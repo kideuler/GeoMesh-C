@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <math.h>
+#include <time.h>
 
 #ifndef GEOMESH
 #define GEOMESH
@@ -50,6 +52,9 @@ int hfid2lid(int hfid);
 struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs);
 void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start);
 bool Mesh_find_enclosing_tri(struct Mesh* msh, int* tri, double ps[2]);
+void flip_edge(struct Mesh* msh, int eid, int lid);
 bool inside_tri(const double xs[3][2], const double ps[2]);
+bool inside_circumtri(const double xs[3][2], const double ps[2]);
+double* circumcenter(const double xs[3][2]);
 
 #endif

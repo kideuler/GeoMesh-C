@@ -28,7 +28,7 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     struct Mesh msh;
     struct Mesh *mshbuff = (struct Mesh *) malloc(sizeof(struct Mesh));
     msh.nelems = 0;
-    int upper_bound = nv*nv*2;
+    int upper_bound = nv*4;
 
     // creating temporary buffers
     struct DoubleMatrix *coords = (struct DoubleMatrix *) malloc(sizeof(struct DoubleMatrix));
@@ -90,14 +90,28 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     }
 
 
+    // deleting any elements with big triangle points in them
+    for (int i = 0; i<mshbuff->nelems; i++){
+        for (int j = 0; j<3; j++){
+            if (mshbuff->elems.data[i*3+j] >= nv){
+                mshbuff->delete_elem[i] = true;
+            }
+        }
+    }
+
+
+    int nelems = 0;
+    for (int i = 0; i<mshbuff->nelems; i++){
+        if (!mshbuff->delete_elem[i]){nelems++;}
+    }
 
 
     msh.coords = *xs;
-    msh.nelems = mshbuff->nelems;
-    msh.elems = IntMatrix_create(msh.nelems,3);
-    msh.sibhfs = IntMatrix_create(msh.nelems,3);
+    msh.nelems = nelems;
+    msh.elems = IntMatrix_create(nelems,3);
+    msh.sibhfs = IntMatrix_create(nelems,3);
     int k = 0;
-    for (int i = 0; i<msh.nelems; i++){
+    for (int i = 0; i<mshbuff->nelems; i++){
         if (!mshbuff->delete_elem[i]) {
             for (int j = 0; j<3; j++){
                 msh.elems.data[msh.elems.ncols*k + j] = mshbuff->elems.data[msh.elems.ncols*i + j];
@@ -123,8 +137,8 @@ void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
     int tri[3] = {msh->elems.data[tri_start*msh->elems.ncols],msh->elems.data[tri_start*msh->elems.ncols+1],msh->elems.data[tri_start*msh->elems.ncols+2]};
     int sib[3] = {msh->sibhfs.data[tri_start*msh->sibhfs.ncols],msh->sibhfs.data[tri_start*msh->sibhfs.ncols+1],msh->sibhfs.data[tri_start*msh->sibhfs.ncols+2]};
 
-    int* stack = (int*) malloc(msh->nelems*sizeof(int));
-    int stack_size = 0;
+    int* stack = (int*) malloc(msh->elems.nrows*sizeof(int));
+    int stack_size = -1;
     int eids[3] = {msh->nelems, msh->nelems+1, msh->nelems+2};
     // splitting triangles and adding them to the stack
     for (int i = 0; i<3; i++){
@@ -137,19 +151,45 @@ void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
         msh->sibhfs.data[eids[i]*msh->sibhfs.ncols+2] = elids2hfid(eids[(i+1)%3]+1,1);
         if (hfid2eid(hfid) > 0){
             msh->sibhfs.data[(hfid2eid(hfid)-1)*msh->sibhfs.ncols + hfid2lid(hfid)-1] = elids2hfid(eids[i]+1, 2);
-            stack[stack_size] = elids2hfid(eids[i]+1, 2);
+            stack[stack_size+1] = elids2hfid(eids[i]+1, 2);
             stack_size++;
         }
     }
 
     msh->nelems+=3;
-    double xs[3][2];
+    double xs[3][2], ps[2];
     int oppeid, opplid;
     while (stack_size > -1){
         hfid = stack[stack_size];
         stack_size--;
         eid = hfid2eid(hfid)-1;
         lid = hfid2lid(hfid)-1;
+        oppeid = hfid2eid(msh->sibhfs.data[eid*3 + lid])-1;
+        opplid = hfid2lid(msh->sibhfs.data[eid*3 + lid])-1;
+        xs[0][0] = msh->coords.data[2*msh->elems.data[3*oppeid]];
+        xs[0][1] = msh->coords.data[2*msh->elems.data[3*oppeid]+1];
+        xs[1][0] = msh->coords.data[2*msh->elems.data[3*oppeid+1]];
+        xs[1][1] = msh->coords.data[2*msh->elems.data[3*oppeid+1]+1];
+        xs[2][0] = msh->coords.data[2*msh->elems.data[3*oppeid+2]];
+        xs[2][1] = msh->coords.data[2*msh->elems.data[3*oppeid+2]+1];
+        ps[0] = msh->coords.data[2*msh->elems.data[3*eid]];
+        ps[1] = msh->coords.data[2*msh->elems.data[3*eid]+1];
+        if (inside_circumtri(xs,ps)){
+            // flip edge
+            flip_edge(msh,eid,1);
+            
+            hfid = msh->sibhfs.data[3*oppeid+1];
+            if (hfid2eid(hfid) > 0){
+                stack[stack_size+1] = elids2hfid(oppeid+1,2);
+                stack_size++;
+            }
+            hfid = msh->sibhfs.data[3*eid+1];
+            if (hfid2eid(hfid) > 0){
+                stack[stack_size+1] = elids2hfid(eid+1,2);
+                stack_size++;
+            }
+            
+        }
     }
 
 
@@ -165,7 +205,7 @@ bool Mesh_find_enclosing_tri(struct Mesh* msh, int* tri, double ps[2]){
     i = 0;
     stop = false;
     double xs[3][2] = {{0,0},{0,0},{0,0}};
-    while (!stop){
+    while (!stop && iters<10000){
         v1 = msh->elems.data[(*tri)*(msh->elems.ncols)];
         v2 = msh->elems.data[(*tri)*(msh->elems.ncols)+1];
         v3 = msh->elems.data[(*tri)*(msh->elems.ncols)+2];
@@ -220,14 +260,64 @@ bool Mesh_find_enclosing_tri(struct Mesh* msh, int* tri, double ps[2]){
                     *tri = elids2hfid(*tri+1,3);
                     return false;
                 }
-            } else {
-
+            } else {   
+                printf("error occurd\n");
             }
         }
         iters++;
     }
+    if (iters >= 500){
+        printf("infinite loop encountered\n");
+    }
     *tri = -1;
     return false;
+}
+
+void flip_edge(struct Mesh* msh, int eid, int lid){
+    int hfid = msh->sibhfs.data[3*eid + lid];
+    int oppeid = hfid2eid(hfid)-1;
+    int opplid = hfid2lid(hfid)-1;
+
+    int v1 = msh->elems.data[3*eid + ((lid+2)%3)];
+    int v2 = msh->elems.data[3*eid + lid];
+    int v3 = msh->elems.data[3*eid + ((lid+1)%3)];
+    int v4 = msh->elems.data[3*oppeid + ((opplid+2)%3)];
+
+    int tri1[3] = {v1,v2,v4};
+    int tri2[3] = {v1,v4,v3};
+    int sib1[3] = {msh->sibhfs.data[3*eid + ((lid+2)%3)],msh->sibhfs.data[3*oppeid + (opplid+1)%3],elids2hfid(oppeid+1,1)};
+    int sib2[3] = {elids2hfid(eid+1,3),msh->sibhfs.data[oppeid*3 + ((opplid+2)%3)],msh->sibhfs.data[eid*3 + ((lid+1)%3)]};
+
+    msh->elems.data[eid*3] = tri1[0]; msh->elems.data[eid*3+1] = tri1[1]; msh->elems.data[eid*3+2] = tri1[2];
+    msh->elems.data[oppeid*3] = tri2[0]; msh->elems.data[oppeid*3+1] = tri2[1]; msh->elems.data[oppeid*3+2] = tri2[2];
+    msh->sibhfs.data[eid*3] = sib1[0];
+    msh->sibhfs.data[eid*3+1] = sib1[1];
+    msh->sibhfs.data[eid*3+2] = sib1[2];
+    msh->sibhfs.data[oppeid*3] = sib2[0];
+    msh->sibhfs.data[oppeid*3+1] = sib2[1];
+    msh->sibhfs.data[oppeid*3+2] = sib2[2];
+
+    bool sib11 = false;
+    bool sib12 = false;
+    bool sib21 = false;
+    bool sib22 = false;
+    hfid = msh->sibhfs.data[eid*3];
+    if (hfid2eid(hfid) > 0){
+        msh->sibhfs.data[3*(hfid2eid(hfid)-1) + (hfid2lid(hfid)-1)] = elids2hfid(eid+1,1);
+    }
+    hfid = msh->sibhfs.data[eid*3+1];
+    if (hfid2eid(hfid) > 0){
+        msh->sibhfs.data[3*(hfid2eid(hfid)-1) + (hfid2lid(hfid)-1)] = elids2hfid(eid+1,2);
+    }
+    hfid = msh->sibhfs.data[oppeid*3+1];
+    if (hfid2eid(hfid) > 0){
+        msh->sibhfs.data[3*(hfid2eid(hfid)-1) + (hfid2lid(hfid)-1)] = elids2hfid(oppeid+1,2);
+    }
+    hfid = msh->sibhfs.data[oppeid*3+2];
+    if (hfid2eid(hfid) > 0){
+        msh->sibhfs.data[3*(hfid2eid(hfid)-1) + (hfid2lid(hfid)-1)] = elids2hfid(oppeid+1,3);
+    }
+    return;
 }
 
 bool inside_tri(const double xs[3][2], const double ps[2]){
@@ -238,3 +328,30 @@ bool inside_tri(const double xs[3][2], const double ps[2]){
     bool has_pos = (val1 >= 0) || (val2>=0) || (val3>=0);
     return !(has_neg && has_pos);
 }
+
+bool inside_circumtri(const double xs[3][2], const double ps[2]){
+    double* C = circumcenter(xs);
+    double R = (xs[0][0]-C[0])*(xs[0][0]-C[0]) + (xs[0][1] - C[1])*(xs[0][1] - C[1]);
+    bool D = ((ps[0]-C[0])*(ps[0]-C[0]) + (ps[1] - C[1])*(ps[1] - C[1])) < R;
+    return (D);
+}
+
+double* circumcenter(const double xs[3][2]){
+    double ax = xs[0][0];
+    double ay = xs[0][1];
+    double bx = xs[1][0];
+    double by = xs[1][1];
+    double cx = xs[2][0];
+    double cy = xs[2][1];
+    double D = 2*(ax*(by-cy) + bx*(cy-ay) + cx*(ay-by));
+    double ux = (ax*ax + ay*ay)*(by-cy) + \
+        (bx*bx + by*by)*(cy-ay) + \
+        (cx*cx + cy*cy)*(ay-by);
+    double uy = (ax*ax + ay*ay)*(cx-bx) + \
+        (bx*bx + by*by)*(ax-cx) + \
+        (cx*cx + cy*cy)*(bx-ax);
+    static double C[2];
+    C[0] = ux/D; C[1] = uy/D;
+    return C;
+}
+
