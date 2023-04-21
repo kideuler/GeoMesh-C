@@ -26,19 +26,23 @@ struct DoubleMatrix Flower(int npoints){
 
 int main(void){
     srand ( time(NULL) );
-    int npoints = 2000;
+    int npoints = 100;
 
     //struct DoubleMatrix xs = DoubleMatrix_create_Random(npoints,2,0.3,0.7);
 
     struct DoubleMatrix xs = Flower(npoints);
     struct IntMatrix segs = IntMatrix_create(npoints,2);
-    for(int i = 0; i<npoints; i++){segs.data[2*i]=i; segs.data[2*i+1]=(i+1)%npoints;}
-
-    //load_lakeSuperior(&segs, &xs);
+    double h = 0.0;
+    for(int i = 0; i<npoints; i++){segs.data[2*i]=i; segs.data[2*i+1]=(i+1)%npoints;
+    h += sqrt(pow(xs.data[2*((i+1)%npoints)]-xs.data[2*i],2)+pow(xs.data[2*((i+1)%npoints)+1]-xs.data[2*i+1],2));}
+    h = h/((double)npoints);
+    load_lakeSuperior(&segs, &xs);
     clock_t start = clock(), diff;
 
     //struct Mesh msh = GeoMesh_Delaunay(&xs);
     struct Mesh msh = GeoMesh_ConstrainedDelaunay(&segs,&xs);
+    bool is_sib = check_sibhfs(&msh);
+    GeoMesh_DelaunayRefine(&msh, false, h,1);
 
     diff = clock() - start;
     int msec = diff * 1000 / CLOCKS_PER_SEC;

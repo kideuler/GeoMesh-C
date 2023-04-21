@@ -36,8 +36,9 @@ void IntMatrix_print(struct IntMatrix* M){
 
 // resizing functions
 void DoubleMatrix_resize(struct DoubleMatrix* M, int newsz){
-    double* data = (double*)malloc(newsz*M->ncols*sizeof(double));
-    for (int i = 0; i< (newsz>M->nrows)?M->nrows:newsz; i++){
+    double* data = (double*)malloc(newsz * M->ncols * sizeof(double));
+    int size = (newsz>M->nrows)?M->nrows:newsz;
+    for (int i = 0; i< size; i++){
         for (int j = 0; j<M->ncols; j++){
             data[M->ncols*i + j] = M->data[M->ncols*i + j];
         }
@@ -47,8 +48,9 @@ void DoubleMatrix_resize(struct DoubleMatrix* M, int newsz){
     M->data = data;
 }
 void IntMatrix_resize(struct IntMatrix* M, int newsz){
-    int* data = (int*)malloc(newsz*M->ncols*sizeof(int));
-    for (int i = 0; i< (newsz>M->nrows)?M->nrows:newsz; i++){
+    int* data = (int*)malloc(newsz * M->ncols * sizeof(int));
+    int size = (newsz>M->nrows)?M->nrows:newsz;
+    for (int i = 0; i<size; i++){
         for (int j = 0; j<M->ncols; j++){
             data[M->ncols*i + j] = M->data[M->ncols*i + j];
         }

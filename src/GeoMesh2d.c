@@ -22,16 +22,18 @@ void Mesh_print(struct Mesh *msh){
 }
 
 // Use Delaunay mesh to refine mesh
-void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_target){
+void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_target, int point_algorithm){
     int nv = msh->coords.nrows;
     int nelems_initial = msh->nelems;
-    int n,i,tri,eid,lid,upper_bound,e;
+    int n,i,tri,hfid,eid,lid,upper_bound,e;
     bool exitl;
-    double alpha,theta;
+    double alpha=1.0;
+    double theta,shape;
     double ps[3][2];
 
     // finding total area to estimate size bounds
     double total_area = 0.0;
+    double area;
     for (n=0; n<nelems_initial; n++){
         ps[0][0] = msh->coords.data[2*msh->elems.data[3*n]];
         ps[0][1] = msh->coords.data[2*msh->elems.data[3*n]+1];
@@ -39,15 +41,32 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
         ps[1][1] = msh->coords.data[2*msh->elems.data[3*n+1]+1];
         ps[2][0] = msh->coords.data[2*msh->elems.data[3*n+2]];
         ps[2][1] = msh->coords.data[2*msh->elems.data[3*n+2]+1];
-        total_area += area_tri(ps);
+        area = area_tri(ps);
+        total_area += area;
     }
-    double area_single = sqrt(3)*h_target*h_target/4;
-    double radius_target = (sqrt(3)/3)*h_target;
-    upper_bound = (int) 2*total_area/area_single;
+
+    double radius_target;
+    if (use_edgelengh){
+        double area_single = pow(sqrt(3)*h_target/3,2)/2;
+        radius_target = (sqrt(3)/3)*h_target;
+        upper_bound = (int) 2*total_area/area_single;
+        upper_bound = (upper_bound>4*msh->nelems)? upper_bound : 4*msh->nelems;
+    } else {
+        upper_bound = 10*msh->nelems;
+    }
     DoubleMatrix_resize(&msh->coords,upper_bound);
     IntMatrix_resize(&msh->elems,upper_bound);
     IntMatrix_resize(&msh->sibhfs,upper_bound);
     free(msh->delete_elem);
+    msh->delete_elem = (bool*) malloc(upper_bound*sizeof(bool));
+    memset(msh->delete_elem, false, upper_bound*sizeof(bool));
+    bool* on_bdy = (bool*) malloc(upper_bound*sizeof(bool));
+    memset(on_bdy, false, upper_bound*sizeof(bool));
+    for(int i = 0; i<upper_bound; i++){
+        on_bdy[i] = msh->on_boundary[i];
+    }
+    free(msh->on_boundary);
+    msh->on_boundary = on_bdy;
     double *C; // buffer for added center
     int* order = (int*) malloc(upper_bound*sizeof(int));
     for(n=0;n<upper_bound;n++){order[n]=n;}
@@ -55,7 +74,7 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
     // main loop
     n = 0;
     bool inside_domain,stop;
-    while (n<msh->nelems){
+    while (n<msh->nelems && msh->nelems <= upper_bound-1){
         e = order[n];
         if (!msh->delete_elem[e]){
             ps[0][0] = msh->coords.data[2*msh->elems.data[3*e]];
@@ -64,28 +83,83 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
             ps[1][1] = msh->coords.data[2*msh->elems.data[3*e+1]+1];
             ps[2][0] = msh->coords.data[2*msh->elems.data[3*e+2]];
             ps[2][1] = msh->coords.data[2*msh->elems.data[3*e+2]+1];
-            C = circumcenter(ps);
+            if (point_algorithm == 1) {C = circumcenter(ps);}
+            if (point_algorithm == 2) {C = off_circumcenter(ps);}
             C[0] += 1e-4*drand(-1.0,1.0);
             C[1] += 1e-4*drand(-1.0,1.0);
             
-            alpha = eval_alpha(ps,radius_target);
-            if (alpha > 1.2){
+            shape = eval_trishape(ps);
+            if (use_edgelengh){alpha = eval_alpha(ps,radius_target);}
+
+            printf("alpha: %f shape: %f\n",alpha,shape);
+            if (alpha > 1.2 || shape > 1.5){
                 // add coordinate
                 msh->coords.data[2*nv] = C[0];
                 msh->coords.data[2*nv+1] = C[1];
                 tri = e;
                 inside_domain = Mesh_find_enclosing_tri(msh,&tri,C);
-                printf("alpha: %f\n",alpha);
                 if (!inside_domain){
                     if (tri == -1){
                         printf("find triangle location failed: deleting point\n");
                         nv--;
                     } else { // place point on segment midpoint
-
+                        if (inside_diametral(msh,tri, C)){
+                            Mesh_flip_insertion_segment(msh,nv, tri);
+                        } else {
+                            if (msh->on_boundary[e]){
+                                Mesh_flip_insertion_segment(msh,nv, tri);
+                            } else{
+                                if (n == msh->nelems-1 || e == msh->nelems-1){
+                                    Mesh_flip_insertion_segment(msh,nv, tri);
+                                } else {
+                                    nv--;
+                                    order[n] = msh->nelems-1;
+                                    order[msh->nelems-1] = e;
+                                    n--;
+                                }
+                            }
+                        }
                     }
-                } else { // check if point is in dimetral circle
+                } else { // check if point is in diametral circle of nearby elems
                     stop = false;
-
+                    if (msh->on_boundary[tri]){
+                        hfid = (msh->sibhfs.data[3*tri]==0) ? elids2hfid(tri+1,1) : \
+                        ((msh->sibhfs.data[3*tri+1]==0) ? elids2hfid(tri+1,2) : elids2hfid(tri+1,3));
+                        if (inside_diametral(msh,hfid, C)){
+                            Mesh_flip_insertion_segment(msh,nv, hfid);
+                            stop = true;
+                        }
+                    } else if(msh->sibhfs.data[3*tri] > 0) {
+                        if(msh->on_boundary[hfid2eid(msh->sibhfs.data[3*tri])-1]){
+                        eid = hfid2eid(msh->sibhfs.data[3*tri])-1;
+                        hfid = (msh->sibhfs.data[3*eid]==0) ? elids2hfid(eid+1,1) : \
+                        ((msh->sibhfs.data[3*eid+1]==0) ? elids2hfid(eid+1,2) : elids2hfid(eid+1,3));
+                        if (inside_diametral(msh,hfid, C)){
+                            Mesh_flip_insertion_segment(msh,nv, hfid);
+                            stop = true;
+                        }
+                        }
+                    } else if(msh->sibhfs.data[3*tri+1] > 0) {
+                        if(msh->on_boundary[hfid2eid(msh->sibhfs.data[3*tri+1])-1]){
+                        eid = hfid2eid(msh->sibhfs.data[3*tri+1])-1;
+                        hfid = (msh->sibhfs.data[3*eid]==0) ? elids2hfid(eid+1,1) : \
+                        ((msh->sibhfs.data[3*eid+1]==0) ? elids2hfid(eid+1,2) : elids2hfid(eid+1,3));
+                        if (inside_diametral(msh,hfid, C)){
+                            Mesh_flip_insertion_segment(msh,nv, hfid);
+                            stop = true;
+                        }
+                        }
+                    } else if(msh->sibhfs.data[3*tri+2] > 0) {
+                        if(msh->on_boundary[hfid2eid(msh->sibhfs.data[3*tri+2])-1]){
+                        eid = hfid2eid(msh->sibhfs.data[3*tri+2])-1;
+                        hfid = (msh->sibhfs.data[3*eid]==0) ? elids2hfid(eid+1,1) : \
+                        ((msh->sibhfs.data[3*eid+1]==0) ? elids2hfid(eid+1,2) : elids2hfid(eid+1,3));
+                        if (inside_diametral(msh,hfid, C)){
+                            Mesh_flip_insertion_segment(msh,nv, hfid);
+                            stop = true;
+                        }
+                        }
+                    }
 
                     if (!stop){
                         Mesh_flip_insertion(msh,&nv,tri);
@@ -98,6 +172,11 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
 
         n++;
     }
+
+    if (msh->nelems >= upper_bound){
+        printf("max buffer size reached\n");
+    }
+    free(order);
     Mesh_deleteElems(msh);
     DoubleMatrix_resize(&msh->coords, nv);
 }
@@ -224,6 +303,7 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     msh.elems = IntMatrix_create(upper_bound,3);
     msh.sibhfs = IntMatrix_create(upper_bound,3);
     msh.on_boundary = (bool* ) malloc(upper_bound*sizeof(bool));
+    msh.stack = (int*) malloc(upper_bound*sizeof(int));
 
     // creating temporary buffers
     struct DoubleMatrix *coords = (struct DoubleMatrix *) malloc(sizeof(struct DoubleMatrix));
@@ -368,7 +448,7 @@ void Mesh_deleteElems(struct Mesh* msh){
     int* sibhfs_data  = (int*)malloc(3*nelems*sizeof(int));
     int* idx = (int*)malloc(msh->nelems*sizeof(int));
     int* idx_rev = (int*)malloc(msh->nelems*sizeof(int));
-    memset(idx_rev,-1,nelems*sizeof(int));
+    memset(idx_rev,-1,msh->nelems*sizeof(int));
 
     int k = 0;
     for (int i = 0; i<msh->nelems; i++){
@@ -388,8 +468,9 @@ void Mesh_deleteElems(struct Mesh* msh){
             msh->delete_elem[i] = false;
         }
     }
+    msh->nelems = nelems;
 
-    for (int i = 0; i<nelems; i++){
+    for (int i = 0; i<msh->nelems; i++){
         idx_rev[idx[i]] = i;
     }
 
@@ -429,9 +510,10 @@ void Mesh_deleteElems(struct Mesh* msh){
     free(idx); free(idx_rev);
     free(msh->elems.data);
     msh->elems.data = elems_data;
+    msh->elems.nrows = nelems;
     free(msh->sibhfs.data);
+    msh->sibhfs.nrows = nelems;
     msh->sibhfs.data = sibhfs_data;
-    msh->nelems = nelems;
 }
 
 void Recursive_findDelete(struct Mesh* msh, int hfid){
@@ -457,13 +539,13 @@ void Recursive_findDelete(struct Mesh* msh, int hfid){
 
 void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
     int hfid,eid,lid;
+    msh->delete_elem[tri_start] = true;
 
     int tri[3] = {msh->elems.data[tri_start*msh->elems.ncols],msh->elems.data[tri_start*msh->elems.ncols+1],msh->elems.data[tri_start*msh->elems.ncols+2]};
     int sib[3] = {msh->sibhfs.data[tri_start*msh->sibhfs.ncols],msh->sibhfs.data[tri_start*msh->sibhfs.ncols+1],msh->sibhfs.data[tri_start*msh->sibhfs.ncols+2]};
 
-    int* stack = (int*) malloc(msh->elems.nrows*sizeof(int));
     int stack_size = -1;
-    int eids[3] = {tri_start, msh->nelems, msh->nelems+1};
+    int eids[3] = {msh->nelems, msh->nelems+1, msh->nelems+2};
     // splitting triangles and adding them to the stack
     for (int i = 0; i<3; i++){
         msh->elems.data[eids[i]*msh->elems.ncols] = *vid;
@@ -475,7 +557,7 @@ void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
         msh->sibhfs.data[eids[i]*msh->sibhfs.ncols+2] = elids2hfid(eids[(i+1)%3]+1,1);
         if (hfid2eid(hfid) > 0){
             msh->sibhfs.data[(hfid2eid(hfid)-1)*msh->sibhfs.ncols + hfid2lid(hfid)-1] = elids2hfid(eids[i]+1, 2);
-            stack[stack_size+1] = elids2hfid(eids[i]+1, 2);
+            msh->stack[stack_size+1] = elids2hfid(eids[i]+1, 2);
             stack_size++;
             msh->on_boundary[eids[i]] = false;
         } else {
@@ -483,11 +565,11 @@ void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
         }
     }
 
-    msh->nelems+=2;
+    msh->nelems+=3;
     double xs[3][2], ps[2];
     int oppeid, opplid;
     while (stack_size > -1){
-        hfid = stack[stack_size];
+        hfid = msh->stack[stack_size];
         stack_size--;
         eid = hfid2eid(hfid)-1;
         lid = hfid2lid(hfid)-1;
@@ -507,20 +589,95 @@ void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
             
             hfid = msh->sibhfs.data[3*oppeid+1];
             if (hfid2eid(hfid) > 0){
-                stack[stack_size+1] = elids2hfid(oppeid+1,2);
+                msh->stack[stack_size+1] = elids2hfid(oppeid+1,2);
                 stack_size++;
             }
             hfid = msh->sibhfs.data[3*eid+1];
             if (hfid2eid(hfid) > 0){
-                stack[stack_size+1] = elids2hfid(eid+1,2);
+                msh->stack[stack_size+1] = elids2hfid(eid+1,2);
                 stack_size++;
             }
             
         }
     }
 
+    return;
+}
 
-    free(stack);
+void Mesh_flip_insertion_segment(struct Mesh* msh, int vid, int hfid){
+    int stack_size = -1;
+    int eid = hfid2eid(hfid)-1;
+    int lid = hfid2lid(hfid)-1;
+
+    msh->coords.data[2*vid] = (msh->coords.data[2*msh->elems.data[3*eid+lid]]+ \
+    msh->coords.data[2*msh->elems.data[3*eid+(lid+1)%3]])/2.0;
+    msh->coords.data[2*vid+1] = (msh->coords.data[2*msh->elems.data[3*eid+lid]+1]+ \
+    msh->coords.data[2*msh->elems.data[3*eid+(lid+1)%3]+1])/2.0;
+
+    msh->delete_elem[eid] = true;
+    msh->elems.data[3*msh->nelems] = vid;
+    msh->elems.data[3*msh->nelems+1] = msh->elems.data[3*eid+(lid+2)%3];
+    msh->elems.data[3*msh->nelems+2] = msh->elems.data[3*eid+lid];
+    msh->elems.data[3*(msh->nelems+1)] = vid;
+    msh->elems.data[3*(msh->nelems+1)+1] = msh->elems.data[3*eid+(lid+1)%3];
+    msh->elems.data[3*(msh->nelems+1)+2] = msh->elems.data[3*eid+(lid+2)%3];
+
+    msh->sibhfs.data[3*msh->nelems] = elids2hfid(msh->nelems+2,3);
+    msh->sibhfs.data[3*msh->nelems+1] = msh->sibhfs.data[3*eid+(lid+2)%3];
+    msh->sibhfs.data[3*msh->nelems+2] = 0;
+    msh->sibhfs.data[3*(msh->nelems+1)] = 0;
+    msh->sibhfs.data[3*(msh->nelems+1)+1] = msh->sibhfs.data[3*eid+(lid+1)%3];
+    msh->sibhfs.data[3*(msh->nelems+1)+2] = elids2hfid(msh->nelems+1,1);
+    if (msh->sibhfs.data[3*eid+(lid+1)%3] != 0){
+        msh->sibhfs.data[3*(hfid2eid(msh->sibhfs.data[3*eid+(lid+1)%3])-1)+\
+        hfid2lid(msh->sibhfs.data[3*eid+(lid+1)%3])-1] = elids2hfid(msh->nelems+2, 2);
+        msh->stack[stack_size+1] = elids2hfid(msh->nelems+2,2);
+        stack_size++;
+    }
+    if (msh->sibhfs.data[3*eid+(lid+2)%3] != 0){
+        msh->sibhfs.data[3*(hfid2eid(msh->sibhfs.data[3*eid+(lid+2)%3])-1)+\
+        hfid2lid(msh->sibhfs.data[3*eid+(lid+2)%3])-1] = elids2hfid(msh->nelems+1, 2);
+        msh->stack[stack_size+1] = elids2hfid(msh->nelems+1,2);
+        stack_size++;
+    }
+    msh->on_boundary[msh->nelems] = true;
+    msh->on_boundary[msh->nelems+1] = true;
+
+    msh->nelems+=2;
+
+    double xs[3][2],ps[2];
+    int oppeid, opplid;
+    while (stack_size > -1){
+        hfid = msh->stack[stack_size];
+        stack_size--;
+        eid = hfid2eid(hfid)-1;
+        lid = hfid2lid(hfid)-1;
+        oppeid = hfid2eid(msh->sibhfs.data[3*eid+lid])-1;
+        opplid = hfid2lid(msh->sibhfs.data[3*eid+lid])-1;
+        xs[0][0] = msh->coords.data[2*msh->elems.data[3*oppeid]];
+        xs[0][1] = msh->coords.data[2*msh->elems.data[3*oppeid]+1];
+        xs[1][0] = msh->coords.data[2*msh->elems.data[3*oppeid+1]];
+        xs[1][1] = msh->coords.data[2*msh->elems.data[3*oppeid+1]+1];
+        xs[2][0] = msh->coords.data[2*msh->elems.data[3*oppeid+2]];
+        xs[2][1] = msh->coords.data[2*msh->elems.data[3*oppeid+2]+1];
+        ps[0] = msh->coords.data[2*msh->elems.data[3*eid]];
+        ps[1] = msh->coords.data[2*msh->elems.data[3*eid]+1];
+
+        if (inside_circumtri(xs,ps)){
+            flip_edge(msh, eid,lid);
+
+            hfid = msh->sibhfs.data[3*oppeid+1];
+            if (hfid2eid(hfid) > 0){
+                msh->stack[stack_size+1] = elids2hfid(oppeid+1,2);
+                stack_size++;
+            }
+            hfid = msh->sibhfs.data[3*eid+1];
+            if (hfid2eid(hfid) > 0){
+                msh->stack[stack_size+1] = elids2hfid(eid+1,2);
+                stack_size++;
+            }
+        }
+    }
     return;
 }
 
@@ -739,6 +896,17 @@ bool inside_circumtri(const double xs[3][2], const double ps[2]){
     return (D);
 }
 
+bool inside_diametral(struct Mesh* msh, int hfid, double ps[2]){
+    int eid = hfid2eid(hfid) - 1;
+    int lid = hfid2lid(hfid) - 1;
+    double v1[2] = {msh->coords.data[2*msh->elems.data[3*eid+lid]],msh->coords.data[2*msh->elems.data[3*eid+lid]+1]};
+    double v2[2] = {msh->coords.data[2*msh->elems.data[3*eid+(lid+1)%3]],msh->coords.data[2*msh->elems.data[3*eid+(lid+1)%3]+1]};
+    double r = sqrt(pow(v2[0]-v1[0],2) + pow(v2[1]-v1[1],2))/2;
+    double p[2] = {(v1[0]+v2[0])/2, (v1[1]+v2[1])/2}; 
+    double dist = sqrt(pow(ps[0]-p[0],2) + pow(ps[1]-p[1],2));
+    return dist < r;
+}
+
 double* circumcenter(const double xs[3][2]){
     double ax = xs[0][0];
     double ay = xs[0][1];
@@ -756,6 +924,41 @@ double* circumcenter(const double xs[3][2]){
     static double C[2];
     C[0] = ux/D; C[1] = uy/D;
     return C;
+}
+
+double* off_circumcenter(const double xs[3][2]){
+    double* c1 = circumcenter(xs);
+    double ps[3][2];
+    double m[2];
+    double distpq = 1e6;
+    double temp;
+    double beta = sqrt(2);
+    for (int i = 0; i<3; i++){
+        temp = sqrt(pow(xs[(i+1)%3][0]-xs[i][0],2)+pow(xs[(i+1)%3][1]-xs[i][1],2));
+        if (temp < distpq){
+            distpq = temp;
+            m[0] = (xs[(i+1)%3][0]+xs[i][0])/2;
+            m[1] = (xs[(i+1)%3][1]+xs[i][1])/2;
+            ps[0][0] = xs[i][0];
+            ps[0][1] = xs[i][1];
+            ps[1][0] = xs[(i+1)%3][0];
+            ps[1][1] = xs[(i+1)%3][1];
+        }
+    }
+    ps[2][0] = c1[0];
+    ps[2][1] = c1[1];
+    double* c2 = circumcenter(ps);
+    double distc1c2 = sqrt(pow(c1[0]-c2[0],2) + pow(c1[1]-c2[1],2));
+    double distc2m = sqrt(pow(m[0]-c2[0],2) + pow(m[1]-c2[1],2));
+    double* c = (double*)malloc(2*sizeof(double));
+    c[0] = 0.0; c[1] = 0.0;
+    if (distc1c2 <= beta*distpq){
+        c[0] = c1[0]; c[1] = c1[1];
+    } else{
+        c[0] = c2[0] + 0.95*beta*distpq*(c2[0]-m[0])/distc2m;
+        c[1] = c2[1] + 0.95*beta*distpq*(c2[1]-m[1])/distc2m;
+    }
+    return c;
 }
 
 double area_tri(const double xs[3][2]){
@@ -809,6 +1012,17 @@ double eval_alpha(const double xs[3][2],double radius_target){
     double A = sqrt(s*(s-a)*(s-b)*(s-c));
     double r = a*b*c/(4*A);
     return r/radius_target;
+}
+
+double eval_trishape(const double xs[3][2]){
+    double a = sqrt(pow(xs[1][0]-xs[0][0],2) + pow(xs[1][1]-xs[0][1],2));
+    double b = sqrt(pow(xs[2][0]-xs[1][0],2) + pow(xs[2][1]-xs[1][1],2));
+    double c = sqrt(pow(xs[0][0]-xs[2][0],2) + pow(xs[0][1]-xs[2][1],2));
+    double sa = ((xs[1][0]-xs[0][0])*(xs[2][0]-xs[0][0]) + (xs[1][1]-xs[0][1])*(xs[2][1]-xs[0][1]))/(a*c);
+    double sb = ((xs[0][0]-xs[1][0])*(xs[2][0]-xs[1][0]) + (xs[0][1]-xs[1][1])*(xs[2][1]-xs[1][1]))/(a*b);
+    double sc = ((xs[0][0]-xs[2][0])*(xs[1][0]-xs[2][0]) + (xs[0][1]-xs[2][1])*(xs[1][1]-xs[2][1]))/(b*c);
+    sa = sqrt(1-sa*sa); sb = sqrt(1-sb*sb); sc = sqrt(1-sc*sc);
+    return (sa+sb+sc)/(4*sa*sb*sc);
 }
 
 void Mesh_draw(struct Mesh* msh){
@@ -893,5 +1107,34 @@ void Mesh_draw(struct Mesh* msh){
     FreeAllocations();
 
     return;
+}
+
+bool check_sibhfs(struct Mesh* msh){
+    const int edges[3][2] = {{0,1},{1,2},{2,0}};
+    int nelems = msh->nelems;
+    int hfid,eid,lid;
+    bool check = true;
+    for (int i = 0; i<nelems; i++){
+        for (int j = 0; j<3; j++){
+            hfid = msh->sibhfs.data[3*i+j];
+            if (hfid != 0){
+            eid = hfid2eid(hfid);
+            lid = hfid2lid(hfid);
+            if (eid > nelems || lid > 3 || eid < 0 || msh->delete_elem[eid-1]){
+                printf("sibhfs is wrong at elem %d lid %d oppeid %d opplid %d\n",i,j,eid-1,lid-1);
+                check = false;
+            } 
+            if (msh->elems.data[3*i+edges[j][0]] != msh->elems.data[3*(eid-1)+edges[lid-1][1]] || msh->elems.data[3*i+edges[j][1]] != msh->elems.data[3*(eid-1)+edges[lid-1][0]]){
+                printf("sides dont match, wrong at elem %d, lid %d, oppeid %d, opplid %d, sibhfs %d\n",i,j,eid-1,lid-1,hfid);
+                check = false;
+            }   
+            }
+        }
+    }
+    return check;
+} 
+
+bool check_jacobians(struct Mesh* msh){
+
 }
 
