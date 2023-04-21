@@ -21,29 +21,109 @@ void Mesh_print(struct Mesh *msh){
     IntMatrix_print(&msh->sibhfs);
 }
 
+// Constrained Delaunay triangulation driver function
+struct Mesh GeoMesh_ConstrainedDelaunay(struct IntMatrix *segments, struct DoubleMatrix *xs){
+    struct Mesh msh = GeoMesh_Delaunay(xs);
+    int maxne=10;
+    Mesh_compute_OneringElements(&msh,maxne);
+    maxne = msh.stncl.maxne;
+
+    int* facets = (int*) malloc(2*msh.nelems*sizeof(int));
+    msh.bwork = (bool*) malloc(msh.nelems*sizeof(bool));
+    msh.delete_elem = (bool*) malloc(msh.nelems*sizeof(bool));
+
+    int v1,v2,hvid,kk,eid,nid,nf,hfid,lid,oppeid,opplid;
+    bool inray,connected,convex;
+    nf = 0;
+    for (int seg = 0; seg<segments->nrows; seg++){
+        v1 = segments->data[2*seg]; v2 = segments->data[2*seg+1];
+        connected = false;
+
+        while (!connected){ // while segment not done
+            inray = false;
+            convex = false;
+            hvid = 1;
+            kk = 0;
+            // finds segment or line that obstructs segments
+            while (!inray && !connected && kk < maxne){
+                hvid = msh.stncl.hvids.data[v1*maxne + kk];
+                if (hvid <= 0){
+                    break;
+                }
+
+                // check if either edge of the triangle connects to the targeted vertex
+                eid = hfid2eid(hvid)-1;
+                nid = hfid2lid(hvid)-1;
+                if (msh.elems.data[3*eid + (nid+1)%3] == v2){
+                    connected = true;
+                    hfid = msh.sibhfs.data[3*eid+nid];
+                    if (hfid > 0){
+                        facets[2*nf] = eid;
+                        facets[2*nf+1] = nid;
+                        msh.bwork[eid] = true;
+                        nf++;
+                    }
+                    break;
+                }
+                if (msh.elems.data[3*eid + (nid+2)%3] == v2){
+                    connected = true;
+                    hfid = msh.sibhfs.data[3*eid+(nid+2)%3];
+                    if (hfid > 0){
+                        facets[2*nf] = hfid2eid(hfid)-1;
+                        facets[2*nf+1] = hfid2lid(hfid)-1;
+                        msh.bwork[ hfid2eid(hfid)-1] = true;
+                        nf++;
+                    }
+                    break;
+                }
+
+                // check if the opposite edge is obstructing the desired segment
+                if (Line_cross(msh.coords.data[2*msh.elems.data[3*eid + (nid+1)%3]],msh.coords.data[2*msh.elems.data[3*eid + (nid+1)%3]+1], \
+                msh.coords.data[2*msh.elems.data[3*eid + (nid+2)%3]],msh.coords.data[2*msh.elems.data[3*eid + (nid+2)%3]+1], \
+                msh.coords.data[2*v1],msh.coords.data[2*v1+1], msh.coords.data[2*v2],msh.coords.data[2*v2+1])){
+                    inray = true;
+                    break;
+                }
+                kk++;
+            }
+
+            if (inray) { // flip segment and correct onering if convex quad
+                // IMPLEMENT
+            }
+        }
+    }
+
+    // delete elements on opposite side of boundary
+    if (true){
+        for (int i=0; i<nf; i++){
+            eid = facets[2*i];
+            lid = facets[2*i+1];
+            hfid = msh.sibhfs.data[3*eid+lid];
+            Recursive_findDelete(&msh, hfid);
+        }
+    }
+    Mesh_deleteElems(&msh);
+
+    free(facets);
+
+    return msh;
+}
+
 // Delaunay triangulation driver function
 struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     int nv = xs->nrows;
 
     struct Mesh msh;
-    struct Mesh *mshbuff = (struct Mesh *) malloc(sizeof(struct Mesh));
     msh.nelems = 0;
     int upper_bound = nv*4;
+    msh.elems = IntMatrix_create(upper_bound,3);
+    msh.sibhfs = IntMatrix_create(upper_bound,3);
 
     // creating temporary buffers
     struct DoubleMatrix *coords = (struct DoubleMatrix *) malloc(sizeof(struct DoubleMatrix));
     coords->nrows = nv+3;
     coords->ncols = 2;
     coords->data = (double* ) malloc((nv+3)*2*sizeof(double));
-
-    mshbuff->elems.nrows = upper_bound;
-    mshbuff->elems.ncols = 3;
-    mshbuff->elems.data = (int*) malloc((upper_bound)*3*sizeof(int));
-
-    mshbuff->sibhfs.nrows = upper_bound;
-    mshbuff->sibhfs.ncols = 3;
-    mshbuff->sibhfs.data = (int*) malloc((upper_bound)*3*sizeof(int));
-
 
     double ax = DoubleMatrix_min(xs,0); double ay = DoubleMatrix_min(xs,1);
     double bx = DoubleMatrix_max(xs,0); double by = DoubleMatrix_max(xs,1);
@@ -54,7 +134,37 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
         coords->data[n*coords->ncols+1] = (xs->data[n*xs->ncols+1] - ay)/d;
     }
 
-    // sort points by proximity NOT IMPL.
+    // sort points by proximity using binsort
+    int nbin = (int)ceil(pow(nv,0.5));
+    int* bins = (int*)malloc(nv*sizeof(int));
+    int* order = (int*)malloc(nv*sizeof(int));
+    for (int n = 0; n<nv; n++){
+        int p = (int)(coords->data[2*n]*nbin*0.999);
+        int q = (int)(coords->data[2*n+1]*nbin*0.999);
+        if (p%2){
+            bins[n] = (p+1)*nbin-q;
+        } else {
+            bins[n] = p*nbin+q+1;
+        } 
+        bins[n] = (p%2) ? (p+1)*nbin-q : p*nbin+q+1;
+        order[n] = n;
+    }
+
+    int key;
+    int temp;
+    int i,j;
+    for (i = 1; i<nv; i++){
+        key = bins[i];
+        temp = order[i];
+        j = i-1;
+        while(j>=0 && bins[j]>key){
+            bins[j+1] = bins[j];
+            order[j+1] = order[j];
+            j--;
+        }
+        bins[j+1] = key;
+        order[j+1] = temp;
+    }
 
     // create big triangle
     coords->data[nv*coords->ncols] = -100.0;
@@ -64,70 +174,172 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     coords->data[(nv+2)*coords->ncols] = 0.0;
     coords->data[(nv+2)*coords->ncols+1] = 100.0;
 
-    mshbuff->elems.data[0] = nv;
-    mshbuff->elems.data[1] = nv+1; 
-    mshbuff->elems.data[2] = nv+2;
-    mshbuff->sibhfs.data[0] = 0; mshbuff->sibhfs.data[1] = 0; mshbuff->sibhfs.data[2] = 0;
+    msh.elems.data[0] = nv;
+    msh.elems.data[1] = nv+1; 
+    msh.elems.data[2] = nv+2;
+    msh.sibhfs.data[0] = 0; msh.sibhfs.data[1] = 0; msh.sibhfs.data[2] = 0;
 
     // main loop inserting each node into the triangulation
     int enclosed_tri=-1;
     int vid;
     bool exitl, inside;
-    mshbuff->coords = *coords;
-    mshbuff->nelems = 1;
-    mshbuff->delete_elem = (bool *) malloc(upper_bound*sizeof(bool));
+    msh.coords = *coords;
+    msh.nelems = 1;
+    msh.delete_elem = (bool *) malloc(upper_bound*sizeof(bool));
     for (int n = 0; n<nv; n++){
-        vid = n;
-        enclosed_tri = mshbuff->nelems-1;
+        vid = order[n];
+        enclosed_tri = msh.nelems-1;
         // find enclosing triangle
-        double ps[2] = {mshbuff->coords.data[vid*mshbuff->coords.ncols],mshbuff->coords.data[vid*mshbuff->coords.ncols+1]};
-        inside = Mesh_find_enclosing_tri(mshbuff, &enclosed_tri, ps);
+        double ps[2] = {msh.coords.data[vid*msh.coords.ncols],msh.coords.data[vid*msh.coords.ncols+1]};
+        inside = Mesh_find_enclosing_tri(&msh, &enclosed_tri, ps);
 
         if (!inside){ printf("no enclosing triangle found\n");}
 
         // insert node into triangulation using sloans flip insertion algorithm
-        Mesh_flip_insertion(mshbuff, &vid, enclosed_tri);
+        Mesh_flip_insertion(&msh, &vid, enclosed_tri);
     }
+    free(bins);
+    free(order);
 
 
     // deleting any elements with big triangle points in them
-    for (int i = 0; i<mshbuff->nelems; i++){
+    for (int i = 0; i<msh.nelems; i++){
         for (int j = 0; j<3; j++){
-            if (mshbuff->elems.data[i*3+j] >= nv){
-                mshbuff->delete_elem[i] = true;
+            if (msh.elems.data[i*3+j] >= nv){
+                msh.delete_elem[i] = true;
             }
         }
     }
 
 
-    int nelems = 0;
-    for (int i = 0; i<mshbuff->nelems; i++){
-        if (!mshbuff->delete_elem[i]){nelems++;}
-    }
+    Mesh_deleteElems(&msh);
 
 
     msh.coords = *xs;
-    msh.nelems = nelems;
-    msh.elems = IntMatrix_create(nelems,3);
-    msh.sibhfs = IntMatrix_create(nelems,3);
-    int k = 0;
-    for (int i = 0; i<mshbuff->nelems; i++){
-        if (!mshbuff->delete_elem[i]) {
-            for (int j = 0; j<3; j++){
-                msh.elems.data[msh.elems.ncols*k + j] = mshbuff->elems.data[msh.elems.ncols*i + j];
-                msh.sibhfs.data[msh.sibhfs.ncols*k + j] = mshbuff->sibhfs.data[msh.sibhfs.ncols*i + j];
+
+    // freeing temporary buffers
+    free(coords->data); free(coords);
+    return msh;
+}
+
+void Mesh_compute_OneringElements(struct Mesh* msh, int maxne){
+    int nv = msh->coords.nrows;
+    msh->stncl.maxne = maxne;
+    msh->stncl.hvids = IntMatrix_create(nv,maxne);
+    memset(msh->stncl.hvids.data, -1, nv*maxne*sizeof(int));
+    msh->stncl.nhvids = (int*)malloc(nv*sizeof(int));
+    memset(msh->stncl.nhvids, 0, nv*sizeof(int));
+
+    int v;
+    for (int i = 0; i<msh->nelems; i++){
+        for (int j = 0; j<3; j++){
+            v = msh->elems.data[3*i + j];
+            msh->stncl.nhvids[v]++;
+            if ( msh->stncl.nhvids[v] >= maxne){
+                free(msh->stncl.nhvids);
+                free(msh->stncl.hvids.data);
+                printf("Mesh_compute_OneringElements: buffers too small, enlarging buffers and rerunning\n");
+                Mesh_compute_OneringElements(msh, 2*maxne);
+                return;
             }
-            k++;
+            msh->stncl.hvids.data[maxne*v + msh->stncl.nhvids[v]-1] = elids2hfid(i+1,j+1);
         }
     }
 
-    // freeing temporary buffers
-    free(coords->data); free(coords); 
-    free(mshbuff->elems.data);
-    free(mshbuff->sibhfs.data);
-    free(mshbuff->delete_elem);
-    free(mshbuff);
-    return msh;
+    return;
+}
+
+void Mesh_deleteElems(struct Mesh* msh){
+
+    int nelems=0;
+    for (int i = 0; i<msh->nelems; i++){
+        if (!msh->delete_elem[i]){nelems++;}
+    }
+
+    int* elems_data  = (int*)malloc(3*nelems*sizeof(int));
+    int* sibhfs_data  = (int*)malloc(3*nelems*sizeof(int));
+    int* idx = (int*)malloc(msh->nelems*sizeof(int));
+    int* idx_rev = (int*)malloc(msh->nelems*sizeof(int));
+    memset(idx_rev,-1,nelems*sizeof(int));
+
+    int k = 0;
+    for (int i = 0; i<msh->nelems; i++){
+        if (!msh->delete_elem[i]) {
+            for (int j = 0; j<3; j++){
+                elems_data[3*k] = msh->elems.data[3*i];
+                elems_data[3*k+1] = msh->elems.data[3*i+1];
+                elems_data[3*k+2] = msh->elems.data[3*i+2];
+                sibhfs_data[3*k] = msh->sibhfs.data[3*i];
+                sibhfs_data[3*k+1] = msh->sibhfs.data[3*i+1];
+                sibhfs_data[3*k+2] = msh->sibhfs.data[3*i+2];
+            }
+            msh->delete_elem[k] = false;
+            idx[k] = i;
+            k++;
+        } else {
+            msh->delete_elem[i] = false;
+        }
+    }
+
+    for (int i = 0; i<nelems; i++){
+        idx_rev[idx[i]] = i;
+    }
+
+    // fix sibhfs
+    int nside;
+    int hfid, eid, lid;
+    for (int i = 0; i<nelems; i++){
+        nside = 0;
+        for (int j = 0; j < 3; j++){
+            hfid = sibhfs_data[3*i+j];
+            if (!hfid == 0){
+                eid = hfid2eid(hfid);
+                lid = hfid2lid(hfid);
+                if (!msh->delete_elem[eid-1]){
+                    if (idx_rev[eid-1] == -1){
+                        sibhfs_data[3*i+j] = 0;
+                    } else {
+                        sibhfs_data[3*i+j] = elids2hfid(idx_rev[eid-1]+1,lid);
+                    }
+                } else {
+                    sibhfs_data[3*i+j] = 0;
+                }
+                nside++;
+            } else {
+                sibhfs_data[3*i+j] = 0;
+            }
+        }
+        msh->delete_elem[i] = false;
+    }
+
+
+    free(idx); free(idx_rev);
+    free(msh->elems.data);
+    msh->elems.data = elems_data;
+    free(msh->sibhfs.data);
+    msh->sibhfs.data = sibhfs_data;
+    msh->nelems = nelems;
+}
+
+void Recursive_findDelete(struct Mesh* msh, int hfid){
+    int eid = hfid2eid(hfid)-1;
+    int lid = hfid2lid(hfid)-1;
+    if (!msh->delete_elem[eid]){
+        msh->delete_elem[eid] = true;
+        int hfid1 = msh->sibhfs.data[3*eid+(lid+1)%3];
+        if (hfid1 != 0){
+            if (!msh->bwork[hfid2eid(hfid1)-1]){
+                Recursive_findDelete(msh, hfid1);
+            }
+        }
+        int hfid2 = msh->sibhfs.data[3*eid+(lid+2)%3];
+        if (hfid2 != 0){
+            if (!msh->bwork[hfid2eid(hfid2)-1]){
+                Recursive_findDelete(msh, hfid2);
+            }
+        }
+    } 
+    return;
 }
 
 void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
@@ -196,7 +408,6 @@ void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
     free(stack);
     return;
 }
-
 
 bool Mesh_find_enclosing_tri(struct Mesh* msh, int* tri, double ps[2]){
     int v1,v2,v3,i,hfid;
@@ -353,5 +564,87 @@ double* circumcenter(const double xs[3][2]){
     static double C[2];
     C[0] = ux/D; C[1] = uy/D;
     return C;
+}
+
+bool Line_cross(double p1x, double p1y, double p2x, double p2y, double p3x, double p3y, double p4x, double p4y){
+    bool a1 = (p4y-p1y)*(p3x-p1x) > (p3y-p1y)*(p4x-p1x);
+    bool a2 = (p4y-p2y)*(p3x-p2x) > (p3y-p2y)*(p4x-p2x);
+    bool b1 = (p3y-p1y)*(p2x-p1x) > (p2y-p1y)*(p3x-p1x);
+    bool b2 = (p4y-p1y)*(p2x-p1x) > (p2y-p1y)*(p4x-p1x);
+
+    return (a1 != a2 && b1 != b2);
+}
+
+void Mesh_draw(struct Mesh* msh){
+    int nv = msh->coords.nrows;
+    double x[nv];
+    double y[nv];
+    for (int i = 0; i<nv; i++){
+        x[i] = msh->coords.data[i*msh->coords.ncols];
+        y[i] = msh->coords.data[i*msh->coords.ncols+1];
+    }
+
+    bool success;
+	StringReference *errorMessage;
+	RGBABitmapImageReference *imageReference = CreateRGBABitmapImageReference();
+	ScatterPlotSeries *series = GetDefaultScatterPlotSeriesSettings();
+	series->xs = x;
+	series->xsLength = sizeof(x)/sizeof(double);
+	series->ys = y;
+	series->ysLength = sizeof(y)/sizeof(double);
+	series->linearInterpolation = false;
+	series->pointType = L"dots";
+	series->pointTypeLength = wcslen(series->pointType);
+    series->lineThickness = 1;
+	series->color = CreateRGBColor(1, 0, 0);
+
+	ScatterPlotSettings *settings = GetDefaultScatterPlotSettings();
+	settings->width = 500;
+	settings->height = 500;
+	settings->autoBoundaries = true;
+	settings->autoPadding = true;
+	settings->title = L"";
+	settings->titleLength = wcslen(settings->title);
+	settings->xLabel = L"";
+	settings->xLabelLength = wcslen(settings->xLabel);
+	settings->yLabel = L"";
+	settings->yLabelLength = wcslen(settings->yLabel);
+	ScatterPlotSeries *s [] = {series};
+	settings->scatterPlotSeries = s;
+	settings->scatterPlotSeriesLength = 1;
+    settings->showGrid = false;
+    settings->autoBoundaries = false;
+    settings->autoPadding = false;
+    settings->xMax = 0.8;
+    settings->xMin = 0.2;
+    settings->yMax = 0.8;
+    settings->yMin = 0.2;
+
+
+	errorMessage = (StringReference *)malloc(sizeof(StringReference));
+	success = DrawScatterPlotFromSettings(imageReference, settings, errorMessage);
+
+    double x1,x2,y1,y2;
+    int ncols = msh->elems.ncols;
+    for (int i = 0; i<msh->nelems; i++){
+        for (int j = 0; j<ncols; j++){
+            x1 = MapXCoordinateBasedOnSettings(msh->coords.data[2*msh->elems.data[ncols*i + j]], settings);
+            y1 = MapYCoordinateBasedOnSettings(msh->coords.data[2*msh->elems.data[ncols*i + j]+1], settings);
+            x2 = MapXCoordinateBasedOnSettings(msh->coords.data[2*msh->elems.data[ncols*i + (j+1)%ncols]], settings);
+            y2 = MapYCoordinateBasedOnSettings(msh->coords.data[2*msh->elems.data[ncols*i + (j+1)%ncols]+1], settings);
+            DrawLine(imageReference->image, x1,y1,x2,y2,1, CreateRGBColor(0, 0, 0));
+        }
+    }
+
+
+    if(success){
+		size_t length;
+		double *pngdata = ConvertToPNG(&length, imageReference->image);
+		WriteToFile(pngdata, length, "mesh.png");
+		DeleteImage(imageReference->image);
+	}
+    FreeAllocations();
+
+    return;
 }
 
