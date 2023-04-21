@@ -29,17 +29,21 @@ struct Stencil {
 
 struct Mesh {
     int nelems;
+    bool hasStencil;
     struct DoubleMatrix coords;
     struct IntMatrix elems;
     struct IntMatrix sibhfs; // AHF data structure
     bool *delete_elem;
     bool *bwork;
+    bool *on_boundary;
     struct Stencil stncl;
 };
 
 // matrix functions
 struct DoubleMatrix DoubleMatrix_create(int nrows, int ncols);
 struct IntMatrix IntMatrix_create(int nrows, int ncols);
+void DoubleMatrix_resize(struct DoubleMatrix* M, int newsz);
+void IntMatrix_resize(struct IntMatrix* M, int newsz);
 
 double drand(double low, double high);
 struct DoubleMatrix DoubleMatrix_create_Random(int nrows, int ncols, double low, double high);
@@ -72,10 +76,16 @@ void flip_edge(struct Mesh* msh, int eid, int lid);
 bool inside_tri(const double xs[3][2], const double ps[2]);
 bool inside_circumtri(const double xs[3][2], const double ps[2]);
 double* circumcenter(const double xs[3][2]);
+double area_tri(const double xs[3][2]);
 static bool Line_cross(double p1x, double p1y, double p2x, double p2y, \
 double p3x, double p3y, double p4x, double p4y);
+bool convex_quad(struct Mesh* msh, int eid, int lid);
+double eval_alpha(const double xs[3][2],double radius_target);
 
 // drawing mesh png using pbPlot
 void Mesh_draw(struct Mesh* msh);
+
+// loading lake superior data into matrices
+void load_lakeSuperior(struct IntMatrix* segments, struct DoubleMatrix* coords);
 
 #endif

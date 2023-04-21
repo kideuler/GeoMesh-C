@@ -21,24 +21,110 @@ void Mesh_print(struct Mesh *msh){
     IntMatrix_print(&msh->sibhfs);
 }
 
+// Use Delaunay mesh to refine mesh
+void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_target){
+    int nv = msh->coords.nrows;
+    int nelems_initial = msh->nelems;
+    int n,i,tri,eid,lid,upper_bound,e;
+    bool exitl;
+    double alpha,theta;
+    double ps[3][2];
+
+    // finding total area to estimate size bounds
+    double total_area = 0.0;
+    for (n=0; n<nelems_initial; n++){
+        ps[0][0] = msh->coords.data[2*msh->elems.data[3*n]];
+        ps[0][1] = msh->coords.data[2*msh->elems.data[3*n]+1];
+        ps[1][0] = msh->coords.data[2*msh->elems.data[3*n+1]];
+        ps[1][1] = msh->coords.data[2*msh->elems.data[3*n+1]+1];
+        ps[2][0] = msh->coords.data[2*msh->elems.data[3*n+2]];
+        ps[2][1] = msh->coords.data[2*msh->elems.data[3*n+2]+1];
+        total_area += area_tri(ps);
+    }
+    double area_single = sqrt(3)*h_target*h_target/4;
+    double radius_target = (sqrt(3)/3)*h_target;
+    upper_bound = (int) 2*total_area/area_single;
+    DoubleMatrix_resize(&msh->coords,upper_bound);
+    IntMatrix_resize(&msh->elems,upper_bound);
+    IntMatrix_resize(&msh->sibhfs,upper_bound);
+    free(msh->delete_elem);
+    double *C; // buffer for added center
+    int* order = (int*) malloc(upper_bound*sizeof(int));
+    for(n=0;n<upper_bound;n++){order[n]=n;}
+
+    // main loop
+    n = 0;
+    bool inside_domain,stop;
+    while (n<msh->nelems){
+        e = order[n];
+        if (!msh->delete_elem[e]){
+            ps[0][0] = msh->coords.data[2*msh->elems.data[3*e]];
+            ps[0][1] = msh->coords.data[2*msh->elems.data[3*e]+1];
+            ps[1][0] = msh->coords.data[2*msh->elems.data[3*e+1]];
+            ps[1][1] = msh->coords.data[2*msh->elems.data[3*e+1]+1];
+            ps[2][0] = msh->coords.data[2*msh->elems.data[3*e+2]];
+            ps[2][1] = msh->coords.data[2*msh->elems.data[3*e+2]+1];
+            C = circumcenter(ps);
+            C[0] += 1e-4*drand(-1.0,1.0);
+            C[1] += 1e-4*drand(-1.0,1.0);
+            
+            alpha = eval_alpha(ps,radius_target);
+            if (alpha > 1.2){
+                // add coordinate
+                msh->coords.data[2*nv] = C[0];
+                msh->coords.data[2*nv+1] = C[1];
+                tri = e;
+                inside_domain = Mesh_find_enclosing_tri(msh,&tri,C);
+                printf("alpha: %f\n",alpha);
+                if (!inside_domain){
+                    if (tri == -1){
+                        printf("find triangle location failed: deleting point\n");
+                        nv--;
+                    } else { // place point on segment midpoint
+
+                    }
+                } else { // check if point is in dimetral circle
+                    stop = false;
+
+
+                    if (!stop){
+                        Mesh_flip_insertion(msh,&nv,tri);
+                    }
+                }
+                nv++;
+            }
+
+        }
+
+        n++;
+    }
+    Mesh_deleteElems(msh);
+    DoubleMatrix_resize(&msh->coords, nv);
+}
+
 // Constrained Delaunay triangulation driver function
 struct Mesh GeoMesh_ConstrainedDelaunay(struct IntMatrix *segments, struct DoubleMatrix *xs){
     struct Mesh msh = GeoMesh_Delaunay(xs);
-    int maxne=10;
+    int maxne=20;
     Mesh_compute_OneringElements(&msh,maxne);
     maxne = msh.stncl.maxne;
 
     int* facets = (int*) malloc(2*msh.nelems*sizeof(int));
     msh.bwork = (bool*) malloc(msh.nelems*sizeof(bool));
+    memset(msh.bwork, false, msh.nelems*sizeof(bool));
     msh.delete_elem = (bool*) malloc(msh.nelems*sizeof(bool));
+    memset(msh.delete_elem, false, msh.nelems*sizeof(bool));
 
     int v1,v2,hvid,kk,eid,nid,nf,hfid,lid,oppeid,opplid;
-    bool inray,connected,convex;
+    bool inray = false;
+    bool connected;
+    bool convex = false;
+    int iter = 0;
     nf = 0;
     for (int seg = 0; seg<segments->nrows; seg++){
         v1 = segments->data[2*seg]; v2 = segments->data[2*seg+1];
         connected = false;
-
+        
         while (!connected){ // while segment not done
             inray = false;
             convex = false;
@@ -71,7 +157,7 @@ struct Mesh GeoMesh_ConstrainedDelaunay(struct IntMatrix *segments, struct Doubl
                     if (hfid > 0){
                         facets[2*nf] = hfid2eid(hfid)-1;
                         facets[2*nf+1] = hfid2lid(hfid)-1;
-                        msh.bwork[ hfid2eid(hfid)-1] = true;
+                        msh.bwork[hfid2eid(hfid)-1] = true;
                         nf++;
                     }
                     break;
@@ -88,7 +174,27 @@ struct Mesh GeoMesh_ConstrainedDelaunay(struct IntMatrix *segments, struct Doubl
             }
 
             if (inray) { // flip segment and correct onering if convex quad
-                // IMPLEMENT
+                lid = (nid+1)%3;
+                hfid = msh.sibhfs.data[3*eid+lid];
+                while (!convex_quad(&msh, eid, lid)){ // check if convex quadrilateral
+                    oppeid = hfid2eid(hfid)-1;
+                    opplid = hfid2lid(hfid)-1;
+                    if (Line_cross(msh.coords.data[2*msh.elems.data[3*oppeid + (opplid+1)%3]],msh.coords.data[2*msh.elems.data[3*oppeid + (opplid+1)%3]+1], \
+                    msh.coords.data[2*msh.elems.data[3*oppeid + (opplid+2)%3]],msh.coords.data[2*msh.elems.data[3*oppeid + (opplid+2)%3]+1], \
+                    msh.coords.data[2*v1],msh.coords.data[2*v1+1], msh.coords.data[2*v2],msh.coords.data[2*v2+1])){
+                        eid = oppeid;
+                        lid = (opplid+1)%3;
+                    } else if (Line_cross(msh.coords.data[2*msh.elems.data[3*oppeid + (opplid+2)%3]],msh.coords.data[2*msh.elems.data[3*oppeid + (opplid+2)%3]+1], \
+                    msh.coords.data[2*msh.elems.data[3*oppeid + opplid]],msh.coords.data[2*msh.elems.data[3*oppeid + opplid]+1], \
+                    msh.coords.data[2*v1],msh.coords.data[2*v1+1], msh.coords.data[2*v2],msh.coords.data[2*v2+1])){
+                        eid = oppeid;
+                        lid = (opplid+2)%3;
+                    } else {
+                        printf("no line crossings found\n");
+                    }
+                }
+                flip_edge(&msh, eid, lid);
+                Mesh_compute_OneringElements(&msh, maxne);
             }
         }
     }
@@ -103,7 +209,6 @@ struct Mesh GeoMesh_ConstrainedDelaunay(struct IntMatrix *segments, struct Doubl
         }
     }
     Mesh_deleteElems(&msh);
-
     free(facets);
 
     return msh;
@@ -118,6 +223,7 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     int upper_bound = nv*4;
     msh.elems = IntMatrix_create(upper_bound,3);
     msh.sibhfs = IntMatrix_create(upper_bound,3);
+    msh.on_boundary = (bool* ) malloc(upper_bound*sizeof(bool));
 
     // creating temporary buffers
     struct DoubleMatrix *coords = (struct DoubleMatrix *) malloc(sizeof(struct DoubleMatrix));
@@ -186,6 +292,7 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     msh.coords = *coords;
     msh.nelems = 1;
     msh.delete_elem = (bool *) malloc(upper_bound*sizeof(bool));
+    memset(msh.delete_elem, false, upper_bound*sizeof(bool));
     for (int n = 0; n<nv; n++){
         vid = order[n];
         enclosed_tri = msh.nelems-1;
@@ -223,6 +330,7 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
 }
 
 void Mesh_compute_OneringElements(struct Mesh* msh, int maxne){
+    msh->hasStencil = true;
     int nv = msh->coords.nrows;
     msh->stncl.maxne = maxne;
     msh->stncl.hvids = IntMatrix_create(nv,maxne);
@@ -309,6 +417,11 @@ void Mesh_deleteElems(struct Mesh* msh){
                 sibhfs_data[3*i+j] = 0;
             }
         }
+        if (nside == 3) {
+            msh->on_boundary[i] = false;
+        } else {
+            msh->on_boundary[i] = true;
+        }
         msh->delete_elem[i] = false;
     }
 
@@ -343,7 +456,6 @@ void Recursive_findDelete(struct Mesh* msh, int hfid){
 }
 
 void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
-    msh->delete_elem[tri_start] = true;
     int hfid,eid,lid;
 
     int tri[3] = {msh->elems.data[tri_start*msh->elems.ncols],msh->elems.data[tri_start*msh->elems.ncols+1],msh->elems.data[tri_start*msh->elems.ncols+2]};
@@ -351,7 +463,7 @@ void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
 
     int* stack = (int*) malloc(msh->elems.nrows*sizeof(int));
     int stack_size = -1;
-    int eids[3] = {msh->nelems, msh->nelems+1, msh->nelems+2};
+    int eids[3] = {tri_start, msh->nelems, msh->nelems+1};
     // splitting triangles and adding them to the stack
     for (int i = 0; i<3; i++){
         msh->elems.data[eids[i]*msh->elems.ncols] = *vid;
@@ -365,10 +477,13 @@ void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
             msh->sibhfs.data[(hfid2eid(hfid)-1)*msh->sibhfs.ncols + hfid2lid(hfid)-1] = elids2hfid(eids[i]+1, 2);
             stack[stack_size+1] = elids2hfid(eids[i]+1, 2);
             stack_size++;
+            msh->on_boundary[eids[i]] = false;
+        } else {
+            msh->on_boundary[eids[i]] = true;
         }
     }
 
-    msh->nelems+=3;
+    msh->nelems+=2;
     double xs[3][2], ps[2];
     int oppeid, opplid;
     while (stack_size > -1){
@@ -515,18 +630,95 @@ void flip_edge(struct Mesh* msh, int eid, int lid){
     hfid = msh->sibhfs.data[eid*3];
     if (hfid2eid(hfid) > 0){
         msh->sibhfs.data[3*(hfid2eid(hfid)-1) + (hfid2lid(hfid)-1)] = elids2hfid(eid+1,1);
+    } else {
+        sib11 = true;
     }
     hfid = msh->sibhfs.data[eid*3+1];
     if (hfid2eid(hfid) > 0){
         msh->sibhfs.data[3*(hfid2eid(hfid)-1) + (hfid2lid(hfid)-1)] = elids2hfid(eid+1,2);
+    } else {
+        sib12 = true;
     }
     hfid = msh->sibhfs.data[oppeid*3+1];
     if (hfid2eid(hfid) > 0){
         msh->sibhfs.data[3*(hfid2eid(hfid)-1) + (hfid2lid(hfid)-1)] = elids2hfid(oppeid+1,2);
+    } else {
+        sib21 = true;
     }
     hfid = msh->sibhfs.data[oppeid*3+2];
     if (hfid2eid(hfid) > 0){
         msh->sibhfs.data[3*(hfid2eid(hfid)-1) + (hfid2lid(hfid)-1)] = elids2hfid(oppeid+1,3);
+    } else {
+        sib22 = true;
+    }
+    msh->on_boundary[eid] = sib11 || sib12;
+    msh->on_boundary[oppeid] = sib21 || sib22;
+
+    if (false){
+        // fix stencil for v1
+        int nhvid = msh->stncl.nhvids[v1];
+        for (int i = 0; i<nhvid; i++){
+            if (hfid2eid(msh->stncl.hvids.data[v1*msh->stncl.maxne + i])-1 == eid){
+                msh->stncl.hvids.data[v1*msh->stncl.maxne + i] = elids2hfid(eid+1,1);
+                msh->stncl.hvids.data[v1*msh->stncl.maxne + nhvid] = elids2hfid(oppeid+1,1);
+                msh->stncl.nhvids[v1]++;
+                break;
+            }
+        }
+
+        // fix stencil for v2
+        int place,kk;
+        nhvid = msh->stncl.nhvids[v2];
+        for (int i = 0; i<nhvid; i++){
+            if (hfid2eid(msh->stncl.hvids.data[v2*msh->stncl.maxne + i])-1 == eid){
+                msh->stncl.hvids.data[v2*msh->stncl.maxne + i] = elids2hfid(eid+1,2);
+                break;
+            }
+            if (hfid2eid(msh->stncl.hvids.data[v2*msh->stncl.maxne + i])-1 == oppeid){
+                place = i;
+                break;
+            }
+        }
+        kk=0;
+        for (int i = 0; i<nhvid; i++){
+            if (i != place){
+                msh->stncl.hvids.data[v2*msh->stncl.maxne + kk] = msh->stncl.hvids.data[v2*msh->stncl.maxne + i];
+                kk++;
+            }
+        }
+        msh->stncl.nhvids[v1]--;
+
+        // fix stencil for v3
+        nhvid = msh->stncl.nhvids[v3];
+        for (int i = 0; i<nhvid; i++){
+            if (hfid2eid(msh->stncl.hvids.data[v3*msh->stncl.maxne + i])-1 == oppeid){
+                msh->stncl.hvids.data[v3*msh->stncl.maxne + i] = elids2hfid(oppeid+1,3);
+                break;
+            }
+            if (hfid2eid(msh->stncl.hvids.data[v3*msh->stncl.maxne + i])-1 == eid){
+                place = i;
+                break;
+            }
+        }
+        kk=0;
+        for (int i = 0; i<nhvid; i++){
+            if (i != place){
+                msh->stncl.hvids.data[v3*msh->stncl.maxne + kk] = msh->stncl.hvids.data[v3*msh->stncl.maxne + i];
+                kk++;
+            }
+        }
+        msh->stncl.nhvids[v1]--;
+
+        // fix stencil for v4
+        nhvid = msh->stncl.nhvids[v4];
+        for (int i = 0; i<nhvid; i++){
+            if (hfid2eid(msh->stncl.hvids.data[v4*msh->stncl.maxne + i])-1 == oppeid){
+                msh->stncl.hvids.data[v4*msh->stncl.maxne + i] = elids2hfid(oppeid+1,2);
+                msh->stncl.hvids.data[v4*msh->stncl.maxne + nhvid] = elids2hfid(eid+1,3);
+                msh->stncl.nhvids[v1]++;
+                break;
+            }
+        }
     }
     return;
 }
@@ -566,6 +758,11 @@ double* circumcenter(const double xs[3][2]){
     return C;
 }
 
+double area_tri(const double xs[3][2]){
+    double N = (xs[1][0]-xs[0][0])*(xs[2][1]-xs[0][1]) - (xs[1][1]-xs[0][1])*(xs[2][0]-xs[0][0]);
+    return N/2;
+}
+
 bool Line_cross(double p1x, double p1y, double p2x, double p2y, double p3x, double p3y, double p4x, double p4y){
     bool a1 = (p4y-p1y)*(p3x-p1x) > (p3y-p1y)*(p4x-p1x);
     bool a2 = (p4y-p2y)*(p3x-p2x) > (p3y-p2y)*(p4x-p2x);
@@ -575,7 +772,57 @@ bool Line_cross(double p1x, double p1y, double p2x, double p2y, double p3x, doub
     return (a1 != a2 && b1 != b2);
 }
 
+bool convex_quad(struct Mesh* msh, int eid, int lid){
+    int hfid = msh->sibhfs.data[3*eid+lid];
+    int oppeid = hfid2eid(hfid)-1;
+    int opplid = hfid2lid(hfid)-1;
+
+    int v1 = msh->elems.data[3*eid+(lid+2)%3];
+    int v2 = msh->elems.data[3*eid+lid];
+    int v4 = msh->elems.data[3*eid+(lid+1)%3];
+    int v3 = msh->elems.data[3*oppeid+(opplid+2)%3];
+
+    double sides[4][2] = {{msh->coords.data[2*v2]-msh->coords.data[2*v1],msh->coords.data[2*v2+1]-msh->coords.data[2*v1+1]},
+    {msh->coords.data[2*v3]-msh->coords.data[2*v2],msh->coords.data[2*v3+1]-msh->coords.data[2*v2+1]},
+    {msh->coords.data[2*v4]-msh->coords.data[2*v3],msh->coords.data[2*v4+1]-msh->coords.data[2*v3+1]},
+    {msh->coords.data[2*v1]-msh->coords.data[2*v4],msh->coords.data[2*v1+1]-msh->coords.data[2*v4+1]}};
+
+    double cp;
+    bool sign = false;
+    for (int i = 0; i<4; i++){
+        cp = sides[i][0]*sides[(i+1)%4][1] - sides[i][1]*sides[(i+1)%4][0];
+        if (i==0){
+            sign = (cp>0);
+        } else if (sign != (cp>0)){
+            return false;
+        }
+    }
+
+    return true;
+}
+
+double eval_alpha(const double xs[3][2],double radius_target){
+    double a = sqrt(pow(xs[1][0]-xs[0][0],2)+pow(xs[1][1]-xs[0][1],2));
+    double b = sqrt(pow(xs[2][0]-xs[1][0],2)+pow(xs[2][1]-xs[1][1],2));
+    double c = sqrt(pow(xs[2][0]-xs[0][0],2)+pow(xs[2][1]-xs[0][1],2));
+    double s = 0.5*(a+b+c);
+    double A = sqrt(s*(s-a)*(s-b)*(s-c));
+    double r = a*b*c/(4*A);
+    return r/radius_target;
+}
+
 void Mesh_draw(struct Mesh* msh){
+    double xmin = DoubleMatrix_min(&msh->coords,0);
+    double ymin = DoubleMatrix_min(&msh->coords,1);
+    double xmax = DoubleMatrix_max(&msh->coords,0);
+    double ymax = DoubleMatrix_max(&msh->coords,1);
+    double xmid = (xmin+xmax)/2; double ymid = (ymin+ymax)/2;
+    double d = (xmax-xmin) > (ymax-ymin) ? (xmax-xmin) : (ymax-ymin);
+    xmin = xmid-d/2;
+    xmax = xmid+d/2;
+    ymin = ymid-d/2;
+    ymax = ymid+d/2;
+
     int nv = msh->coords.nrows;
     double x[nv];
     double y[nv];
@@ -599,8 +846,8 @@ void Mesh_draw(struct Mesh* msh){
 	series->color = CreateRGBColor(1, 0, 0);
 
 	ScatterPlotSettings *settings = GetDefaultScatterPlotSettings();
-	settings->width = 500;
-	settings->height = 500;
+	settings->width = 3000;
+	settings->height = 3000;
 	settings->autoBoundaries = true;
 	settings->autoPadding = true;
 	settings->title = L"";
@@ -613,12 +860,12 @@ void Mesh_draw(struct Mesh* msh){
 	settings->scatterPlotSeries = s;
 	settings->scatterPlotSeriesLength = 1;
     settings->showGrid = false;
+
     settings->autoBoundaries = false;
-    settings->autoPadding = false;
-    settings->xMax = 0.8;
-    settings->xMin = 0.2;
-    settings->yMax = 0.8;
-    settings->yMin = 0.2;
+    settings->xMax = xmax;
+    settings->xMin = xmin;
+    settings->yMax = ymax;
+    settings->yMin = ymin;
 
 
 	errorMessage = (StringReference *)malloc(sizeof(StringReference));
