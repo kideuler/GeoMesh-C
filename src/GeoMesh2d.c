@@ -50,7 +50,7 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
         double area_single = pow(sqrt(3)*h_target/3,2)/2;
         radius_target = (sqrt(3)/3)*h_target;
         upper_bound = (int) 2*total_area/area_single;
-        upper_bound = (upper_bound>4*msh->nelems)? upper_bound : 4*msh->nelems;
+        upper_bound = (upper_bound>10*msh->nelems)? upper_bound : 10*msh->nelems;
     } else {
         upper_bound = 10*msh->nelems;
     }
@@ -62,7 +62,7 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
     memset(msh->delete_elem, false, upper_bound*sizeof(bool));
     bool* on_bdy = (bool*) malloc(upper_bound*sizeof(bool));
     memset(on_bdy, false, upper_bound*sizeof(bool));
-    for(int i = 0; i<upper_bound; i++){
+    for(int i = 0; i<msh->nelems; i++){
         on_bdy[i] = msh->on_boundary[i];
     }
     free(msh->on_boundary);
@@ -74,7 +74,7 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
     // main loop
     n = 0;
     bool inside_domain,stop;
-    while (n<msh->nelems && msh->nelems <= upper_bound-1){
+    while (n<msh->nelems){
         e = order[n];
         if (!msh->delete_elem[e]){
             ps[0][0] = msh->coords.data[2*msh->elems.data[3*e]];
@@ -85,14 +85,13 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
             ps[2][1] = msh->coords.data[2*msh->elems.data[3*e+2]+1];
             if (point_algorithm == 1) {C = circumcenter(ps);}
             if (point_algorithm == 2) {C = off_circumcenter(ps);}
-            C[0] += 1e-4*drand(-1.0,1.0);
-            C[1] += 1e-4*drand(-1.0,1.0);
+            C[0] += 1e-4*radius_target*drand(-1.0,1.0);
+            C[1] += 1e-4*radius_target*drand(-1.0,1.0);
             
             shape = eval_trishape(ps);
             if (use_edgelengh){alpha = eval_alpha(ps,radius_target);}
-
-            printf("alpha: %f shape: %f\n",alpha,shape);
-            if (alpha > 1.2 || shape > 1.5){
+                
+            if (alpha > 1.2 || shape > 100){
                 // add coordinate
                 msh->coords.data[2*nv] = C[0];
                 msh->coords.data[2*nv+1] = C[1];
@@ -170,10 +169,19 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
 
         }
 
+        if (msh->nelems > upper_bound-3){
+            printf("max buffer size reached, resizing\n");
+            upper_bound = 2*upper_bound;
+            Mesh_resize(msh, upper_bound);
+            free(order);
+            order = (int*) malloc(upper_bound*sizeof(int));
+            for(i=0;i<upper_bound;i++){order[i]=i;}
+            printf("%d %d\n",n,msh->nelems);
+        }
         n++;
     }
 
-    if (msh->nelems >= upper_bound){
+    if (msh->nelems >= upper_bound-3){
         printf("max buffer size reached\n");
     }
     free(order);
@@ -744,6 +752,7 @@ bool Mesh_find_enclosing_tri(struct Mesh* msh, int* tri, double ps[2]){
                     return false;
                 }
             } else {   
+                assert(false);
                 printf("error occurd\n");
             }
         }
@@ -930,15 +939,15 @@ double* off_circumcenter(const double xs[3][2]){
     double* c1 = circumcenter(xs);
     double ps[3][2];
     double m[2];
-    double distpq = 1e6;
-    double temp;
-    double beta = sqrt(2);
+    double distpq = 1.0e6;
+    double temp=0.0;
+    double beta = sqrt(2.0);
     for (int i = 0; i<3; i++){
         temp = sqrt(pow(xs[(i+1)%3][0]-xs[i][0],2)+pow(xs[(i+1)%3][1]-xs[i][1],2));
         if (temp < distpq){
             distpq = temp;
-            m[0] = (xs[(i+1)%3][0]+xs[i][0])/2;
-            m[1] = (xs[(i+1)%3][1]+xs[i][1])/2;
+            m[0] = (xs[(i+1)%3][0]+xs[i][0])/2.0;
+            m[1] = (xs[(i+1)%3][1]+xs[i][1])/2.0;
             ps[0][0] = xs[i][0];
             ps[0][1] = xs[i][1];
             ps[1][0] = xs[(i+1)%3][0];
@@ -949,11 +958,12 @@ double* off_circumcenter(const double xs[3][2]){
     ps[2][1] = c1[1];
     double* c2 = circumcenter(ps);
     double distc1c2 = sqrt(pow(c1[0]-c2[0],2) + pow(c1[1]-c2[1],2));
-    double distc2m = sqrt(pow(m[0]-c2[0],2) + pow(m[1]-c2[1],2));
+    double distc2m = sqrt(pow(c2[0]-m[0],2) + pow(c2[1]-m[1],2));
     double* c = (double*)malloc(2*sizeof(double));
     c[0] = 0.0; c[1] = 0.0;
     if (distc1c2 <= beta*distpq){
-        c[0] = c1[0]; c[1] = c1[1];
+        c[0] = c1[0];
+        c[1] = c1[1];
     } else{
         c[0] = c2[0] + 0.95*beta*distpq*(c2[0]-m[0])/distc2m;
         c[1] = c2[1] + 0.95*beta*distpq*(c2[1]-m[1])/distc2m;

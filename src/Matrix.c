@@ -60,6 +60,29 @@ void IntMatrix_resize(struct IntMatrix* M, int newsz){
     M->data = data;
 }
 
+void Mesh_resize(struct Mesh* msh, int newsz){
+    DoubleMatrix_resize(&msh->coords,newsz);
+    IntMatrix_resize(&msh->elems,newsz);
+    IntMatrix_resize(&msh->sibhfs,newsz);
+    
+    bool* delete_elem = (bool*) malloc(newsz*sizeof(bool));
+    memset(delete_elem, false, newsz*sizeof(bool));
+    for(int i = 0; i<msh->nelems; i++){
+        delete_elem[i] = msh->delete_elem[i];
+    }
+    free(msh->delete_elem);
+    msh->delete_elem = delete_elem;
+    
+    bool* on_bdy = (bool*) malloc(newsz*sizeof(bool));
+    memset(on_bdy, false, newsz*sizeof(bool));
+    for(int i = 0; i<msh->nelems; i++){
+        on_bdy[i] = msh->on_boundary[i];
+    }
+    free(msh->on_boundary);
+    msh->on_boundary = on_bdy;
+    return;
+}
+
 double DoubleMatrix_min(struct DoubleMatrix* M, int col){
     double val = M->data[col];
     for (int i = 1; i<M->nrows; i++){
@@ -146,4 +169,151 @@ void load_lakeSuperior(struct IntMatrix* segments, struct DoubleMatrix* coords){
     
     fclose(fid);
     return;
+}
+
+double Ellipse(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoints, bool box){
+    int size  = box?(npoints+4):npoints;
+    *segments = IntMatrix_create(npoints,2);
+    *coords = DoubleMatrix_create(size,2);
+
+    double t;
+    for (int i = 0; i<npoints; i++){
+        t = 2*M_PI*(((double) i) / ((double) npoints));
+        coords->data[2*i] = 0.4*cos(t)+0.5;
+        coords->data[2*i+1] = 0.2*sin(t)+0.5;
+    }
+
+    if (box){
+        coords->data[2*npoints] = 0.0001;
+        coords->data[2*npoints+1] = 0.0;
+        coords->data[2*(npoints+1)] = 1.0;
+        coords->data[2*(npoints+1)+1] = 0.0;
+        coords->data[2*(npoints+2)] = 1.0;
+        coords->data[2*(npoints+2)+1] = 1.0;
+        coords->data[2*(npoints+3)] = 0.0;
+        coords->data[2*(npoints+3)+1] = 1.0;
+    }
+
+    double h = 0.0;
+    if (box) {
+        for(int i = 0; i<npoints; i++){
+            segments->data[2*i+1]=i; segments->data[2*i]=(i+1)%npoints;
+            h += sqrt(pow(coords->data[2*((i+1)%npoints)]-coords->data[2*i],2) + \
+            pow(coords->data[2*((i+1)%npoints)+1]-coords->data[2*i+1],2));
+        }
+    } else {
+        for(int i = 0; i<npoints; i++){
+            segments->data[2*i]=i; segments->data[2*i+1]=(i+1)%npoints;
+            h += sqrt(pow(coords->data[2*((i+1)%npoints)]-coords->data[2*i],2) + \
+            pow(coords->data[2*((i+1)%npoints)+1]-coords->data[2*i+1],2));
+        }
+    }
+
+    h = h/((double)npoints);
+    return h;
+}
+
+double Flower(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoints, bool box){
+    int size  = box?(npoints+4):npoints;
+    *segments = IntMatrix_create(npoints,2);
+    *coords = DoubleMatrix_create(size,2);
+
+    double t;
+    for (int i = 0; i<npoints; i++){
+        t = 2*M_PI*(((double) i) / ((double) npoints));
+        coords->data[2*i] = (0.25 + 0.1*sin(5*t))*cos(t)+0.5;
+        coords->data[2*i+1] = (0.25 + 0.1*sin(5*t))*sin(t)+0.5;
+    }
+
+    if (box){
+        coords->data[2*npoints] = 0.0001;
+        coords->data[2*npoints+1] = 0.0;
+        coords->data[2*(npoints+1)] = 1.0;
+        coords->data[2*(npoints+1)+1] = 0.0;
+        coords->data[2*(npoints+2)] = 1.0;
+        coords->data[2*(npoints+2)+1] = 1.0;
+        coords->data[2*(npoints+3)] = 0.0;
+        coords->data[2*(npoints+3)+1] = 1.0;
+    }
+
+    double h = 0.0;
+    if (box) {
+        for(int i = 0; i<npoints; i++){
+            segments->data[2*i+1]=i; segments->data[2*i]=(i+1)%npoints;
+            h += sqrt(pow(coords->data[2*((i+1)%npoints)]-coords->data[2*i],2) + \
+            pow(coords->data[2*((i+1)%npoints)+1]-coords->data[2*i+1],2));
+        }
+    } else {
+        for(int i = 0; i<npoints; i++){
+            segments->data[2*i]=i; segments->data[2*i+1]=(i+1)%npoints;
+            h += sqrt(pow(coords->data[2*((i+1)%npoints)]-coords->data[2*i],2) + \
+            pow(coords->data[2*((i+1)%npoints)+1]-coords->data[2*i+1],2));
+        }
+    }
+
+    h = h/((double)npoints);
+    return h;
+}
+
+double Airfoil(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoints, bool box){
+    int size = 2*npoints;
+    size  = box?(size+4):size;
+    *segments = IntMatrix_create(2*npoints,2);
+    *coords = DoubleMatrix_create(size,2);
+    double t;
+    double yc,theta, yt;
+    double p = 0.4;
+    double m = 0.02;
+    double T = 0.12;
+    int nv = 0;
+    for (int i = 0; i<=npoints; i++){
+        t = (((double) i) / ((double) npoints));
+        yt = 5*T*(0.2969*sqrt(t) - 0.1260*t - 0.3516*t*t + 0.2863*t*t*t - 0.1015*t*t*t*t);
+        yc = (t<=p) ? (m/pow(p,2))*(2*p*t - t*t) : (m/pow(1-p,2))*((1-2*p)+2*p*t-t*t);
+        theta = atan((t<=p) ? 2*(m/pow(p,2))*(p-t) : 2*(m/pow(1-p,2))*(p-t));
+        coords->data[2*nv] = 0.5*(t - yt*sin(theta))+0.25;
+        coords->data[2*nv+1] = 0.5*(yc + yt*cos(theta))+0.5;
+        nv++;
+    }
+    for (int i = 1; i<npoints; i++){
+        t = 1-(((double) i) / ((double) npoints));
+        yt = 5*T*(0.2969*sqrt(t) - 0.1260*t - 0.3516*t*t + 0.2863*t*t*t - 0.1015*t*t*t*t);
+        yc = (t<=p) ? (m/pow(p,2))*(2*p*t - t*t) : (m/pow(1-p,2))*((1-2*p)+2*p*t-t*t);
+        theta = atan((t<=p) ? 2*(m/pow(p,2))*(p-t) : 2*(m/pow(1-p,2))*(p-t));
+        coords->data[2*(nv)] = 0.5*(t + yt*sin(theta))+0.25;
+        coords->data[2*(nv)+1] = 0.5*(yc - yt*cos(theta))+0.5;
+        nv++;
+    }
+
+
+    double h = 0.0;
+    npoints = 2*npoints;
+
+    if (box){
+        coords->data[2*npoints] = 0.0001;
+        coords->data[2*npoints+1] = 0.0;
+        coords->data[2*(npoints+1)] = 1.0;
+        coords->data[2*(npoints+1)+1] = 0.0;
+        coords->data[2*(npoints+2)] = 1.0;
+        coords->data[2*(npoints+2)+1] = 1.0;
+        coords->data[2*(npoints+3)] = 0.0;
+        coords->data[2*(npoints+3)+1] = 1.0;
+    }
+
+    if (!box) {
+        for(int i = 0; i<npoints; i++){
+            segments->data[2*i+1]=i; segments->data[2*i]=(i+1)%npoints;
+            h += sqrt(pow(coords->data[2*((i+1)%npoints)]-coords->data[2*i],2) + \
+            pow(coords->data[2*((i+1)%npoints)+1]-coords->data[2*i+1],2));
+        }
+    } else {
+        for(int i = 0; i<npoints; i++){
+            segments->data[2*i]=i; segments->data[2*i+1]=(i+1)%npoints;
+            h += sqrt(pow(coords->data[2*((i+1)%npoints)]-coords->data[2*i],2) + \
+            pow(coords->data[2*((i+1)%npoints)+1]-coords->data[2*i+1],2));
+        }
+    }
+
+    h = h/((double)npoints);
+    return h;
 }

@@ -5,6 +5,8 @@
 #include <time.h>
 #include <pbPlots.h>
 #include <supportLib.h>
+#include <assert.h>
+//#include <MagickCore/MagickCore.h>
 
 #ifndef GEOMESH
 #define GEOMESH
@@ -40,6 +42,11 @@ struct Mesh {
     struct Stencil stncl;
 };
 
+// Example functions to generate points and segments
+double Ellipse(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoints, bool box);
+double Flower(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoints, bool box);
+double Airfoil(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoints, bool box);
+
 // matrix functions
 struct DoubleMatrix DoubleMatrix_create(int nrows, int ncols);
 struct IntMatrix IntMatrix_create(int nrows, int ncols);
@@ -55,6 +62,9 @@ void IntMatrix_print(struct IntMatrix* M);
 double DoubleMatrix_min(struct DoubleMatrix* M, int col);
 double DoubleMatrix_max(struct DoubleMatrix* M, int col);
 
+// resizing mesh
+void Mesh_resize(struct Mesh* msh, int newsz);
+
 // printing mesh
 void Mesh_print(struct Mesh *msh);
 
@@ -67,6 +77,10 @@ int hfid2lid(int hfid);
 struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs);
 struct Mesh GeoMesh_ConstrainedDelaunay(struct IntMatrix *segments, struct DoubleMatrix *xs);
 void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_target, int point_algorithm);
+
+// isoparametric mesh smoothing functions
+void Mesh_smooth2d(struct Mesh* msh, bool* no_move, int max_Niters);
+double isometry_energy_tri(const double ps[6], double* Grad_elem, double* Hess_elem);
 
 // Delaunay subfunctions
 void Mesh_compute_OneringElements(struct Mesh* msh, int maxne);
