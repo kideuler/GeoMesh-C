@@ -2,11 +2,11 @@
 
 int main(void){
     srand ( time(NULL) );
-    int npoints = 40;
+    int npoints = 200;
 
     struct DoubleMatrix xs;
-    struct IntMatrix segs;;
-    double h = Ellipse(&segs, &xs, npoints,true);
+    struct IntMatrix segs;
+    double h = Flower(&segs, &xs, npoints,false);
     //load_lakeSuperior(&segs, &xs);
     
     clock_t start = clock(), diff;
@@ -21,12 +21,22 @@ int main(void){
     bool is_sib = check_sibhfs(&msh);
 
     start = clock();
-    GeoMesh_DelaunayRefine(&msh,true, h,1);
+    GeoMesh_DelaunayRefine(&msh,true, h,2);
     diff = clock() - start;
     msec = diff * 1000 / CLOCKS_PER_SEC;
     printf("finished Delaunay refinement\n");
     printf("Created %d Triangles in %d seconds %d milliseconds\n", msh.nelems, msec/1000, msec%1000);
 
+    bool* bdy = Mesh_find_bdy_nodes(&msh);
+
+    start = clock();
+    Mesh_smooth2d(&msh, bdy, 500);
+    diff = clock() - start;
+    msec = diff * 1000 / CLOCKS_PER_SEC;
+    printf("finished mesh smoothing in %d seconds %d milliseconds\n", msec/1000, msec%1000);
+
+
     Mesh_draw(&msh);
+    free(bdy);
     return 0;
 }

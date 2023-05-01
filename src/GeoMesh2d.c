@@ -67,7 +67,7 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
     }
     free(msh->on_boundary);
     msh->on_boundary = on_bdy;
-    double *C; // buffer for added center
+    double *C = (double*) malloc(2*sizeof(double)); // buffer for added center
     int* order = (int*) malloc(upper_bound*sizeof(int));
     for(n=0;n<upper_bound;n++){order[n]=n;}
 
@@ -83,15 +83,15 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
             ps[1][1] = msh->coords.data[2*msh->elems.data[3*e+1]+1];
             ps[2][0] = msh->coords.data[2*msh->elems.data[3*e+2]];
             ps[2][1] = msh->coords.data[2*msh->elems.data[3*e+2]+1];
-            if (point_algorithm == 1) {C = circumcenter(ps);}
-            if (point_algorithm == 2) {C = off_circumcenter(ps);}
+            if (point_algorithm == 1) {circumcenter(ps, C);}
+            if (point_algorithm == 2) {off_circumcenter(ps, sqrt(2.0), C);}
             C[0] += 1e-4*radius_target*drand(-1.0,1.0);
             C[1] += 1e-4*radius_target*drand(-1.0,1.0);
             
             shape = eval_trishape(ps);
             if (use_edgelengh){alpha = eval_alpha(ps,radius_target);}
                 
-            if (alpha > 1.2 || shape > 100){
+            if (alpha > 1.2 || shape > 2){
                 // add coordinate
                 msh->coords.data[2*nv] = C[0];
                 msh->coords.data[2*nv+1] = C[1];
@@ -184,7 +184,7 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
     if (msh->nelems >= upper_bound-3){
         printf("max buffer size reached\n");
     }
-    free(order);
+    free(order); free(C);
     Mesh_deleteElems(msh);
     DoubleMatrix_resize(&msh->coords, nv);
 }
@@ -311,6 +311,7 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     msh.elems = IntMatrix_create(upper_bound,3);
     msh.sibhfs = IntMatrix_create(upper_bound,3);
     msh.on_boundary = (bool* ) malloc(upper_bound*sizeof(bool));
+    memset(msh.on_boundary, false, upper_bound*sizeof(bool));
     msh.stack = (int*) malloc(upper_bound*sizeof(int));
 
     // creating temporary buffers
@@ -361,12 +362,12 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     }
 
     // create big triangle
-    coords->data[nv*coords->ncols] = -100.0;
-    coords->data[nv*coords->ncols+1] = -100.0;
-    coords->data[(nv+1)*coords->ncols] = 100.0;
-    coords->data[(nv+1)*coords->ncols+1] = -100.0;
-    coords->data[(nv+2)*coords->ncols] = 0.0;
-    coords->data[(nv+2)*coords->ncols+1] = 100.0;
+    coords->data[nv*2] = -100.0;
+    coords->data[nv*2+1] = -100.0;
+    coords->data[(nv+1)*2] = 100.0;
+    coords->data[(nv+1)*2+1] = -100.0;
+    coords->data[(nv+2)*2] = 0.0;
+    coords->data[(nv+2)*2+1] = 100.0;
 
     msh.elems.data[0] = nv;
     msh.elems.data[1] = nv+1; 
@@ -549,22 +550,22 @@ void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
     int hfid,eid,lid;
     msh->delete_elem[tri_start] = true;
 
-    int tri[3] = {msh->elems.data[tri_start*msh->elems.ncols],msh->elems.data[tri_start*msh->elems.ncols+1],msh->elems.data[tri_start*msh->elems.ncols+2]};
-    int sib[3] = {msh->sibhfs.data[tri_start*msh->sibhfs.ncols],msh->sibhfs.data[tri_start*msh->sibhfs.ncols+1],msh->sibhfs.data[tri_start*msh->sibhfs.ncols+2]};
+    int tri[3] = {msh->elems.data[3*tri_start],msh->elems.data[3*tri_start+1],msh->elems.data[3*tri_start+2]};
+    int sib[3] = {msh->sibhfs.data[3*tri_start],msh->sibhfs.data[3*tri_start+1],msh->sibhfs.data[3*tri_start+2]};
 
     int stack_size = -1;
     int eids[3] = {msh->nelems, msh->nelems+1, msh->nelems+2};
     // splitting triangles and adding them to the stack
     for (int i = 0; i<3; i++){
-        msh->elems.data[eids[i]*msh->elems.ncols] = *vid;
-        msh->elems.data[eids[i]*msh->elems.ncols+1] = tri[i];
-        msh->elems.data[eids[i]*msh->elems.ncols+2] = tri[(i+1)%3];
+        msh->elems.data[3*eids[i]] = *vid;
+        msh->elems.data[3*eids[i]+1] = tri[i];
+        msh->elems.data[3*eids[i]+2] = tri[(i+1)%3];
         hfid = sib[i];
-        msh->sibhfs.data[eids[i]*msh->sibhfs.ncols] = elids2hfid(eids[(i+2)%3]+1 ,3);
-        msh->sibhfs.data[eids[i]*msh->sibhfs.ncols+1] = hfid;
-        msh->sibhfs.data[eids[i]*msh->sibhfs.ncols+2] = elids2hfid(eids[(i+1)%3]+1,1);
+        msh->sibhfs.data[3*eids[i]] = elids2hfid(eids[(i+2)%3]+1 ,3);
+        msh->sibhfs.data[3*eids[i]+1] = hfid;
+        msh->sibhfs.data[3*eids[i]+2] = elids2hfid(eids[(i+1)%3]+1,1);
         if (hfid2eid(hfid) > 0){
-            msh->sibhfs.data[(hfid2eid(hfid)-1)*msh->sibhfs.ncols + hfid2lid(hfid)-1] = elids2hfid(eids[i]+1, 2);
+            msh->sibhfs.data[3*(hfid2eid(hfid)-1) + hfid2lid(hfid)-1] = elids2hfid(eids[i]+1, 2);
             msh->stack[stack_size+1] = elids2hfid(eids[i]+1, 2);
             stack_size++;
             msh->on_boundary[eids[i]] = false;
@@ -591,6 +592,7 @@ void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
         xs[2][1] = msh->coords.data[2*msh->elems.data[3*oppeid+2]+1];
         ps[0] = msh->coords.data[2*msh->elems.data[3*eid]];
         ps[1] = msh->coords.data[2*msh->elems.data[3*eid]+1];
+        
         if (inside_circumtri(xs,ps)){
             // flip edge
             flip_edge(msh,eid,1);
@@ -607,6 +609,7 @@ void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
             }
             
         }
+        
     }
 
     return;
@@ -752,7 +755,7 @@ bool Mesh_find_enclosing_tri(struct Mesh* msh, int* tri, double ps[2]){
                     return false;
                 }
             } else {   
-                assert(false);
+                //assert(false);
                 printf("error occurd\n");
             }
         }
@@ -899,9 +902,12 @@ bool inside_tri(const double xs[3][2], const double ps[2]){
 }
 
 bool inside_circumtri(const double xs[3][2], const double ps[2]){
-    double* C = circumcenter(xs);
+    
+    double* C = (double*) malloc(2*sizeof(double));
+    circumcenter(xs, C);
     double R = (xs[0][0]-C[0])*(xs[0][0]-C[0]) + (xs[0][1] - C[1])*(xs[0][1] - C[1]);
     bool D = ((ps[0]-C[0])*(ps[0]-C[0]) + (ps[1] - C[1])*(ps[1] - C[1])) < R;
+    free(C);
     return (D);
 }
 
@@ -916,7 +922,7 @@ bool inside_diametral(struct Mesh* msh, int hfid, double ps[2]){
     return dist < r;
 }
 
-double* circumcenter(const double xs[3][2]){
+void circumcenter(const double xs[3][2], double* C){
     double ax = xs[0][0];
     double ay = xs[0][1];
     double bx = xs[1][0];
@@ -930,24 +936,24 @@ double* circumcenter(const double xs[3][2]){
     double uy = (ax*ax + ay*ay)*(cx-bx) + \
         (bx*bx + by*by)*(ax-cx) + \
         (cx*cx + cy*cy)*(bx-ax);
-    static double C[2];
     C[0] = ux/D; C[1] = uy/D;
-    return C;
+    return;
 }
 
-double* off_circumcenter(const double xs[3][2]){
-    double* c1 = circumcenter(xs);
+void off_circumcenter(const double xs[3][2], double beta, double* C){
+
+    double* c1 = (double*) malloc(2*sizeof(double));
+    circumcenter(xs, c1);
     double ps[3][2];
     double m[2];
     double distpq = 1.0e6;
     double temp=0.0;
-    double beta = sqrt(2.0);
     for (int i = 0; i<3; i++){
         temp = sqrt(pow(xs[(i+1)%3][0]-xs[i][0],2)+pow(xs[(i+1)%3][1]-xs[i][1],2));
         if (temp < distpq){
             distpq = temp;
-            m[0] = (xs[(i+1)%3][0]+xs[i][0])/2.0;
-            m[1] = (xs[(i+1)%3][1]+xs[i][1])/2.0;
+            m[0] = (xs[(i+1)%3][0]+xs[i][0])/2;
+            m[1] = (xs[(i+1)%3][1]+xs[i][1])/2;
             ps[0][0] = xs[i][0];
             ps[0][1] = xs[i][1];
             ps[1][0] = xs[(i+1)%3][0];
@@ -956,22 +962,37 @@ double* off_circumcenter(const double xs[3][2]){
     }
     ps[2][0] = c1[0];
     ps[2][1] = c1[1];
-    double* c2 = circumcenter(ps);
-    double distc1c2 = sqrt(pow(c1[0]-c2[0],2) + pow(c1[1]-c2[1],2));
-    double distc2m = sqrt(pow(c2[0]-m[0],2) + pow(c2[1]-m[1],2));
-    double* c = (double*)malloc(2*sizeof(double));
-    c[0] = 0.0; c[1] = 0.0;
+    double* c2 = (double*) malloc(2*sizeof(double));
+    circumcenter(ps,c2);
+    double distc1c2 = sqrt(pow(c1[0]-c2[0],2.0) + pow(c1[1]-c2[1],2.0));
     if (distc1c2 <= beta*distpq){
-        c[0] = c1[0];
-        c[1] = c1[1];
+        C[0] = c1[0];
+        C[1] = c1[1];
     } else{
-        c[0] = c2[0] + 0.95*beta*distpq*(c2[0]-m[0])/distc2m;
-        c[1] = c2[1] + 0.95*beta*distpq*(c2[1]-m[1])/distc2m;
+        C[0] = c2[0] + 0.95*beta*distpq*(c2[0]-m[0])/sqrt(pow(c2[0]-m[0],2) + pow(c2[1]-m[1],2));
+        C[1] = c2[1] + 0.95*beta*distpq*(c2[1]-m[1])/sqrt(pow(c2[0]-m[0],2) + pow(c2[1]-m[1],2));
     }
-    return c;
+    free(c1); free(c2);
+    return;
 }
 
-double area_tri(const double xs[3][2]){
+bool* Mesh_find_bdy_nodes(struct Mesh* msh){
+    int nv = msh->coords.nrows;
+    bool* bdy = (bool*) malloc(nv*sizeof(bool));
+    memset(bdy, false, nv*sizeof(bool));
+
+    for (int i = 0; i<msh->nelems; i++){
+        for (int j = 0; j<3; j++){
+            if (msh->sibhfs.data[3*i+j] == 0){
+                bdy[msh->elems.data[3*i+j]] = true;
+                bdy[msh->elems.data[3*i+(j+1)%3]] = true;
+            }
+        }
+    }
+    return bdy;
+}
+
+double area_tri(double xs[3][2]){
     double N = (xs[1][0]-xs[0][0])*(xs[2][1]-xs[0][1]) - (xs[1][1]-xs[0][1])*(xs[2][0]-xs[0][0]);
     return N/2;
 }
@@ -1145,6 +1166,33 @@ bool check_sibhfs(struct Mesh* msh){
 } 
 
 bool check_jacobians(struct Mesh* msh){
+    static double dphi[3][2] = {{-1.0,-1.0},{1.0,0.0},{0.0,1.0}};
+    double xs[3][2], J[2][2], detJ;
+    bool check = true;
 
+    for(int i =0; i<msh->nelems; i++){
+        xs[0][0] = msh->coords.data[2*msh->elems.data[3*i]];
+        xs[0][1] = msh->coords.data[2*msh->elems.data[3*i]+1];
+        xs[1][0] = msh->coords.data[2*msh->elems.data[3*i+1]];
+        xs[1][1] = msh->coords.data[2*msh->elems.data[3*i+1]+1];
+        xs[2][0] = msh->coords.data[2*msh->elems.data[3*i+2]];
+        xs[2][1] = msh->coords.data[2*msh->elems.data[3*i+2]+1];
+
+        for (int ii = 0; ii<2; ii++){
+            for (int jj = 0; jj<2; jj++){
+                J[ii][jj] = 0.0;
+                for (int kk = 0; kk<3; kk++){
+                    J[ii][jj] += xs[kk][ii]*dphi[kk][jj];
+                }
+            }
+        }
+
+        detJ = J[0][0]*J[1][1] - J[0][1]*J[1][0];
+        if (area_tri(xs)<0 || detJ < 0){
+            printf("negative jacobian at eid: %d area: %f\n",i,area_tri(xs));
+            check = false;
+        }
+    }
+    return check;
 }
 

@@ -11,18 +11,42 @@
 #ifndef GEOMESH
 #define GEOMESH
 
+// structure for double matrix
 struct DoubleMatrix{
     int nrows;
     int ncols;
     double* data;
 };
 
+// structure for matrix of ints
 struct IntMatrix{
     int nrows;
     int ncols;
     int* data;
 };
 
+struct kdNode {
+    int depth; // determines the axis used
+    int vid; // node id of this kdnode
+    struct kdNode *left; // left pointer
+    struct kdNode *right; // right pointer
+};
+
+struct kdTree { // data structure designed for quick target circumcircle target radius
+
+    struct kdNode* head; // head node of the tree
+    struct DoubleMatrix coords; // coordinate array
+    double h; // average h of the mesh
+    double* h_ratios; // h fraction of each coordinate
+    double hgrad; // gradiation coefficient 
+    
+    // HOW TO CALCULATE radius_target:
+    // r = distance from coords[vid] to query node
+    // xi = r / (hgrad*h) local variable xi
+    // radius_target = 1-min(xi,1.0)*h_ratios[vid]*h + h*min(xi,1.0);
+};
+
+// stencil used to ensure 
 struct Stencil {
     int maxne;
     struct IntMatrix hvids; // encodes element and local vertex id
@@ -93,9 +117,9 @@ void flip_edge(struct Mesh* msh, int eid, int lid);
 bool inside_tri(const double xs[3][2], const double ps[2]);
 bool inside_circumtri(const double xs[3][2], const double ps[2]);
 bool inside_diametral(struct Mesh* msh, int hfid, double ps[2]);
-double* circumcenter(const double xs[3][2]);
-double* off_circumcenter(const double xs[3][2]);
-double area_tri(const double xs[3][2]);
+void circumcenter(const double xs[3][2], double* C);
+void off_circumcenter(const double xs[3][2], double beta, double* C);
+double area_tri(double xs[3][2]);
 static bool Line_cross(double p1x, double p1y, double p2x, double p2y, \
 double p3x, double p3y, double p4x, double p4y);
 bool convex_quad(struct Mesh* msh, int eid, int lid);
@@ -104,6 +128,8 @@ double eval_trishape(const double xs[3][2]);
 
 // mesh utility functions
 bool check_sibhfs(struct Mesh* msh);
+bool check_jacobians(struct Mesh* msh);
+bool* Mesh_find_bdy_nodes(struct Mesh* msh);
 
 // drawing mesh png using pbPlot
 void Mesh_draw(struct Mesh* msh);
