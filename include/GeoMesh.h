@@ -36,7 +36,7 @@ struct kdTree { // data structure designed for quick target circumcircle target 
 
     struct kdNode* head; // head node of the tree
     struct DoubleMatrix coords; // coordinate array
-    double h; // average h of the mesh
+    double radius; // average h of the mesh
     double* h_ratios; // h fraction of each coordinate
     double hgrad; // gradiation coefficient 
     
@@ -56,6 +56,7 @@ struct Stencil {
 struct Mesh {
     int nelems;
     bool hasStencil;
+    bool haskdTree;
     struct DoubleMatrix coords;
     struct IntMatrix elems;
     struct IntMatrix sibhfs; // AHF data structure
@@ -64,9 +65,11 @@ struct Mesh {
     bool *on_boundary;
     int* stack; // stack buffer for insertion
     struct Stencil stncl;
+    struct kdTree kdt;
 };
 
 // Example functions to generate points and segments
+double Circle(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoints, bool box);
 double Ellipse(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoints, bool box);
 double Flower(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoints, bool box);
 double Airfoil(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoints, bool box);
@@ -108,6 +111,7 @@ double isometry_energy_tri(const double ps[6], double* Grad_elem, double* Hess_e
 
 // Delaunay subfunctions
 void Mesh_compute_OneringElements(struct Mesh* msh, int maxne);
+void Mesh_compute_kdTree(struct Mesh* msh, const struct DoubleMatrix hcoords, double h, double* h_ratios, double hgrad);
 void Mesh_deleteElems(struct Mesh* msh);
 void Recursive_findDelete(struct Mesh* msh, int hfid);
 void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start);
@@ -126,6 +130,12 @@ bool convex_quad(struct Mesh* msh, int eid, int lid);
 double eval_alpha(const double xs[3][2],double radius_target);
 double eval_trishape(const double xs[3][2]);
 
+// kdTree functions
+struct kdTree kdTree_create(const struct DoubleMatrix coords);
+void kdTree_free(struct kdTree* kdt);
+double kdTree_find_target_radius(struct kdTree* kdt, double* point);
+int kdTree_find_nearest_node(struct kdTree* kdt, double* point);
+
 // mesh utility functions
 bool check_sibhfs(struct Mesh* msh);
 bool check_jacobians(struct Mesh* msh);
@@ -134,6 +144,7 @@ bool* Mesh_find_bdy_nodes(struct Mesh* msh);
 // drawing mesh png using pbPlot
 void Mesh_draw(struct Mesh* msh);
 
-// loading lake superior data into matrices
+// loading data into matrices
 void load_lakeSuperior(struct IntMatrix* segments, struct DoubleMatrix* coords);
+void load_monalisa(struct DoubleMatrix* coords);
 #endif

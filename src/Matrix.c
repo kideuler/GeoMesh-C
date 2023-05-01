@@ -171,6 +171,69 @@ void load_lakeSuperior(struct IntMatrix* segments, struct DoubleMatrix* coords){
     return;
 }
 
+void load_monalisa(struct DoubleMatrix* coords){
+    FILE *fid;
+    int nv,nsegs,v1,v2,v3;
+    float x, y, z;
+    free(coords->data);
+
+    fid = fopen("data/monalisa.dat","r");
+
+    fscanf(fid,"%d",&nv);
+    *coords = DoubleMatrix_create(nv,2);
+
+    for(int i=0; i<nv; i++){
+        fscanf(fid,"%d %f %f", &v1,&x,&y);
+        coords->data[2*i] = x;
+        coords->data[2*i+1] = y;
+    }
+
+    fclose(fid);
+    return;
+}
+
+double Circle(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoints, bool box){
+    int size  = box?(npoints+4):npoints;
+    *segments = IntMatrix_create(npoints,2);
+    *coords = DoubleMatrix_create(size,2);
+
+    double t;
+    for (int i = 0; i<npoints; i++){
+        t = 2*M_PI*(((double) i) / ((double) npoints));
+        coords->data[2*i] = 0.5*cos(t)+0.5;
+        coords->data[2*i+1] = 0.5*sin(t)+0.5;
+    }
+
+    if (box){
+        coords->data[2*npoints] = 0.0001;
+        coords->data[2*npoints+1] = 0.0;
+        coords->data[2*(npoints+1)] = 1.0;
+        coords->data[2*(npoints+1)+1] = 0.0;
+        coords->data[2*(npoints+2)] = 1.0;
+        coords->data[2*(npoints+2)+1] = 1.0;
+        coords->data[2*(npoints+3)] = 0.0;
+        coords->data[2*(npoints+3)+1] = 1.0;
+    }
+
+    double h = 0.0;
+    if (box) {
+        for(int i = 0; i<npoints; i++){
+            segments->data[2*i+1]=i; segments->data[2*i]=(i+1)%npoints;
+            h += sqrt(pow(coords->data[2*((i+1)%npoints)]-coords->data[2*i],2) + \
+            pow(coords->data[2*((i+1)%npoints)+1]-coords->data[2*i+1],2));
+        }
+    } else {
+        for(int i = 0; i<npoints; i++){
+            segments->data[2*i]=i; segments->data[2*i+1]=(i+1)%npoints;
+            h += sqrt(pow(coords->data[2*((i+1)%npoints)]-coords->data[2*i],2) + \
+            pow(coords->data[2*((i+1)%npoints)+1]-coords->data[2*i+1],2));
+        }
+    }
+
+    h = h/((double)npoints);
+    return h;
+}
+
 double Ellipse(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoints, bool box){
     int size  = box?(npoints+4):npoints;
     *segments = IntMatrix_create(npoints,2);

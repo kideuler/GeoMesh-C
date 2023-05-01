@@ -48,7 +48,15 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
     double radius_target;
     if (use_edgelengh){
         double area_single = pow(sqrt(3)*h_target/3,2)/2;
-        radius_target = (sqrt(3)/3)*h_target;
+        double hr = 1.0e308;
+        if (msh->haskdTree){
+            for (int i = 0; i<msh->kdt.coords.nrows; i++){
+                if (msh->kdt.h_ratios[i] < hr){hr = msh->kdt.h_ratios[i];}
+            }
+            radius_target = 2*hr*msh->kdt.radius;
+            area_single = pow(radius_target,2.0)/2.0;
+        }
+        else {radius_target = (sqrt(3)/3)*h_target;}
         upper_bound = (int) 2*total_area/area_single;
         upper_bound = (upper_bound>10*msh->nelems)? upper_bound : 10*msh->nelems;
     } else {
@@ -74,6 +82,7 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
     // main loop
     n = 0;
     bool inside_domain,stop;
+    double* centre = (double*) malloc(2*sizeof(double));
     while (n<msh->nelems){
         e = order[n];
         if (!msh->delete_elem[e]){
@@ -85,6 +94,14 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
             ps[2][1] = msh->coords.data[2*msh->elems.data[3*e+2]+1];
             if (point_algorithm == 1) {circumcenter(ps, C);}
             if (point_algorithm == 2) {off_circumcenter(ps, sqrt(2.0), C);}
+
+            // if kdTree is enabled use it to find target radius
+            if (msh->haskdTree) {
+                centre[0] = (ps[0][0]+ps[1][0]+ps[2][0])/3.0;
+                centre[1] = (ps[0][1]+ps[1][1]+ps[2][1])/3.0;
+                radius_target = kdTree_find_target_radius(&msh->kdt, centre);
+            }
+
             C[0] += 1e-4*radius_target*drand(-1.0,1.0);
             C[1] += 1e-4*radius_target*drand(-1.0,1.0);
             
@@ -184,7 +201,7 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
     if (msh->nelems >= upper_bound-3){
         printf("max buffer size reached\n");
     }
-    free(order); free(C);
+    free(order); free(C); free(centre);
     Mesh_deleteElems(msh);
     DoubleMatrix_resize(&msh->coords, nv);
 }
@@ -418,6 +435,17 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     return msh;
 }
 
+// compute kdTree
+void Mesh_compute_kdTree(struct Mesh* msh, const struct DoubleMatrix hcoords, double h, double* h_ratios, double hgrad){
+    msh->haskdTree = true;
+    msh->kdt = kdTree_create(hcoords);
+    msh->kdt.radius = (sqrt(3.0)/3)*h;
+    msh->kdt.h_ratios = h_ratios;
+    msh->kdt.hgrad = hgrad;
+    return;
+}
+
+// compute onering elements
 void Mesh_compute_OneringElements(struct Mesh* msh, int maxne){
     msh->hasStencil = true;
     int nv = msh->coords.nrows;
