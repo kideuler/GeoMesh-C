@@ -435,6 +435,43 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     return msh;
 }
 
+// init Mesh_crsGraph
+void Mesh_Graphinit(struct Mesh* msh, int type){
+    msh->grph.type = type;
+    int nelems = msh->nelems;
+    int nv = msh->coords.nrows;
+    
+    switch (type){
+        case 1:
+        // code for vertex crs creation
+        break;
+
+        case 2: // code for element crs creation
+        msh->grph.row_idx = (int*) malloc((nelems+1)*sizeof(int));
+        msh->grph.col_idx = (int*) malloc(3*nelems*sizeof(int));
+        msh->grph.row_idx[0] = 0;
+        int nnz, oppeid, nnz_elem;
+        nnz = 0;
+        for (int ii = 0; ii<nelems; ii++){
+            nnz_elem = 0;
+            for (int jj = 0; jj<3; jj++){
+                if (msh->sibhfs.data[3*ii+ jj] > 0){
+                    oppeid = hfid2eid(msh->sibhfs.data[3*ii+ jj])-1;
+                    msh->grph.col_idx[nnz + nnz_elem] = oppeid;
+                    nnz_elem++;
+                }
+            }
+            nnz+= nnz_elem;
+            msh->grph.row_idx[ii+1] = nnz;
+        }
+        break;
+        default:
+        printf("Mesh_Graphinit::invalid type input");
+    }
+
+    return;
+}
+
 // compute kdTree
 void Mesh_compute_kdTree(struct Mesh* msh, const struct DoubleMatrix hcoords, double h, double* h_ratios, double hgrad){
     msh->haskdTree = true;
@@ -1119,8 +1156,8 @@ void Mesh_draw(struct Mesh* msh){
 	series->color = CreateRGBColor(1, 0, 0);
 
 	ScatterPlotSettings *settings = GetDefaultScatterPlotSettings();
-	settings->width = 3000;
-	settings->height = 3000;
+	settings->width = 4000;
+	settings->height = 4000;
 	settings->autoBoundaries = true;
 	settings->autoPadding = true;
 	settings->title = L"";
@@ -1224,3 +1261,48 @@ bool check_jacobians(struct Mesh* msh){
     return check;
 }
 
+void Mesh_Graphprint(struct Mesh* msh){
+    for (int ii = 0; ii<msh->nelems+1; ii++){
+        printf("%d ",msh->grph.row_idx[ii]);
+    }
+}
+
+void Mesh2vtk(struct Mesh* msh){
+    FILE *fid;
+    fid = fopen("test.vtk","w");
+    fprintf(fid,"# vtk DataFile Version 3.0\n");
+    fprintf(fid,"This file was written using writevtk_unstr.m\n");
+    fprintf(fid,"ASCII\n");
+
+    int ndims = msh->coords.ncols;
+    int nv = msh->coords.nrows;
+    // header for points
+    fprintf(fid, "DATASET UNSTRUCTURED_GRID\n");
+    fprintf(fid, "POINTS %i double",nv);
+
+    // write out vertices
+    if (ndims == 2){
+        for (int i=0; i<nv;i++){
+            fprintf(fid,"\n%g %g %g",msh->coords.data[2*i],msh->coords.data[2*i+1],0.0);
+        }
+    } else {
+        for (int i=0; i<nv;i++){
+            fprintf(fid,"\n%g %g %g",msh->coords.data[3*i],msh->coords.data[3*i+1],msh->coords.data[3*i+2]);
+        }
+    }
+
+    // write out connectivity header
+    int nelems = msh->nelems;
+    fprintf(fid,"\n\nCELLS %i %i", nelems, 4*nelems);
+    for (int i = 0; i<nelems; i++){
+        fprintf(fid,"\n%d %d %d %d",3,msh->elems.data[3*i],msh->elems.data[3*i+1],msh->elems.data[3*i+2]);
+    }
+
+    // write out cell types
+    fprintf(fid, "\n\nCELL_TYPES %i", nelems);
+    for (int i = 0; i<nelems; i++){
+        fprintf(fid,"\n%i",5);
+    }
+
+    fclose(fid);
+}

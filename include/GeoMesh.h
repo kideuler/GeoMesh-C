@@ -25,6 +25,21 @@ struct IntMatrix{
     int* data;
 };
 
+// structure for MeshPartitions
+struct MeshParts {
+    int type; // 1 for node 2 for elements
+    int npartitions;
+    int* parts_idx; // size nv, or nelems
+    int* parts; 
+};
+
+// structure for CRS
+struct Graph {
+    int type; // 1 for node: 2 for element
+    int* row_idx; 
+    int* col_idx;
+};
+
 struct kdNode {
     int depth; // determines the axis used
     int vid; // node id of this kdnode
@@ -33,17 +48,11 @@ struct kdNode {
 };
 
 struct kdTree { // data structure designed for quick target circumcircle target radius
-
     struct kdNode* head; // head node of the tree
     struct DoubleMatrix coords; // coordinate array
     double radius; // average h of the mesh
     double* h_ratios; // h fraction of each coordinate
     double hgrad; // gradiation coefficient 
-    
-    // HOW TO CALCULATE radius_target:
-    // r = distance from coords[vid] to query node
-    // xi = r / (hgrad*h) local variable xi
-    // radius_target = 1-min(xi,1.0)*h_ratios[vid]*h + h*min(xi,1.0);
 };
 
 // stencil used to ensure 
@@ -57,6 +66,8 @@ struct Mesh {
     int nelems;
     bool hasStencil;
     bool haskdTree;
+    bool hasGraph;
+    bool hasPartition;
     struct DoubleMatrix coords;
     struct IntMatrix elems;
     struct IntMatrix sibhfs; // AHF data structure
@@ -66,6 +77,8 @@ struct Mesh {
     int* stack; // stack buffer for insertion
     struct Stencil stncl;
     struct kdTree kdt;
+    struct Graph grph;
+    struct MeshParts mprts;
 };
 
 // Example functions to generate points and segments
@@ -140,6 +153,12 @@ int kdTree_find_nearest_node(struct kdTree* kdt, double* point);
 bool check_sibhfs(struct Mesh* msh);
 bool check_jacobians(struct Mesh* msh);
 bool* Mesh_find_bdy_nodes(struct Mesh* msh);
+void Mesh2vtk(struct Mesh* msh);
+
+// mesh partitioning functions
+void GeoMesh_partition(struct Mesh* msh, int type, int npartitions);
+void Mesh_Graphinit(struct Mesh* msh, int type);
+void Mesh_Graphprint(struct Mesh* msh);
 
 // drawing mesh png using pbPlot
 void Mesh_draw(struct Mesh* msh);

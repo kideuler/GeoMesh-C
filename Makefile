@@ -11,6 +11,7 @@ make:
 	$(CC) $(CFLAGS) $(ADDITIONAL_FLAGS) -c $(DEPS)
 	$(CC) $(CFLAGS) $(ADDITIONAL_FLAGS) main.c $(DEPS_O) -o $(OBJ) -lm
 	$(RUNFLAGS) ./$(OBJ)
+	sudo cp test.vtk /mnt/c/Users/Jacob/Documents/test.vtk
 .PHONY: clean
 clean:
 	rm -rf *.o *.vtk
