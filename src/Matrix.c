@@ -117,6 +117,35 @@ struct DoubleMatrix DoubleMatrix_create_Random(int nrows, int ncols, double low,
     return M;
 }
 
+struct DoubleMatrix prod(struct DoubleMatrix* A, struct DoubleMatrix* B){
+    int m = A->nrows;
+    int r = A->ncols;
+    int n = B->ncols;
+
+    struct DoubleMatrix C = DoubleMatrix_create(m,n);
+    for (int i = 0; i<m; i++){
+        for (int j = 0; j<n; j++){
+            C.data[n*i+j] = 0.0;
+            for (int k = 0; k<r; k++){
+                C.data[n*i+j] += A->data[r*i + k]*B->data[n*k + j];
+            }
+        }
+    }
+    return C;
+}
+struct DoubleMatrix subtract(struct DoubleMatrix* A, struct DoubleMatrix* B){
+    int m = A->nrows;
+    int n = B->ncols;
+
+    struct DoubleMatrix C = DoubleMatrix_create(m,n);
+    for (int i = 0; i<m; i++){
+        for (int j = 0; j<n; j++){
+            C.data[n*i+j] = A->data[n*i+j] - B->data[n*i+j];
+        }
+    }
+    return C;
+}
+
 void load_lakeSuperior(struct IntMatrix* segments, struct DoubleMatrix* coords){
     FILE *fid;
     int nv,nsegs,v1,v2,v3;
@@ -242,8 +271,8 @@ double Ellipse(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoi
     double t;
     for (int i = 0; i<npoints; i++){
         t = 2*M_PI*(((double) i) / ((double) npoints));
-        coords->data[2*i] = 0.4*cos(t)+0.5;
-        coords->data[2*i+1] = 0.2*sin(t)+0.5;
+        coords->data[2*i] = 0.2*cos(t)+0.5;
+        coords->data[2*i+1] = 0.1*sin(t)+0.5;
     }
 
     if (box){

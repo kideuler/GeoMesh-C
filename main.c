@@ -2,7 +2,7 @@
 
 int main(void){
     srand ( time(NULL) );
-    int npoints = 50;
+    int npoints = 100;
 
     struct DoubleMatrix xs;
     struct IntMatrix segs;

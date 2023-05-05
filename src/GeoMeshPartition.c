@@ -1,6 +1,9 @@
 #include "GeoMesh.h"
 
 void stereo_Project_up(struct DoubleMatrix* points2d, struct DoubleMatrix* points3d);
+void stereo_Project_down(struct DoubleMatrix* points2d, struct DoubleMatrix* points3d);
+void centerpoint(struct DoubleMatrix* points3d, double* C, int csample);
+void conmap(struct DoubleMatrix* points3d, double* C, struct DoubleMatrix* points3d_map);
 void GeoMesh_partition_kernel(struct Mesh* msh, int part);
 
 void GeoMesh_partition(struct Mesh* msh, int type, int npartitions){
@@ -39,7 +42,7 @@ void GeoMesh_partition_kernel(struct Mesh* msh, int part){
     // create iteration numbers
     int ntries = 30;
     int nlines = (int) pow(((double)ntries /2.0), 2.0/3.0);
-    int nouter = (int) ceil(log((double) ntries-nlines+1) / lod(20.0));
+    int nouter = (int) ceil(log((double) ntries-nlines+1) / log(20.0));
     int ninner = (ntries - nlines) / nouter;
     int csample = Min(npoints, pow(5,4));
 
@@ -98,7 +101,7 @@ void GeoMesh_partition_kernel(struct Mesh* msh, int part){
     double circlequality;
     double* C = (double*) malloc(3*sizeof(double));
     for (int n = 0; n<nouter; n++){
-        // find  C centerpoint points3d, csample
+        centerpoint(points3d, C, csample);
 
         // find conmap (points3d, C, points3d_map)
 
@@ -119,6 +122,157 @@ void GeoMesh_partition_kernel(struct Mesh* msh, int part){
     return;
 }
 
+void centerpoint(struct DoubleMatrix* points3d, double* C, int csample){
+    int npoints = points3d->nrows;
+    double npointsd = (double)npoints;
+    double ndim = (double)points3d->ncols;
+    int ndimi = points3d->ncols;
+    double n = Min((double)csample, npointsd);
+    n = (ndim+1.0)*floor((n-1)/(ndim+1)) + 1;
+
+    int sz = (int) ceil(n*(1 + 1/(ndim+1)));
+    // allocating points3ds
+    struct DoubleMatrix* points3ds = (struct DoubleMatrix*) malloc(sizeof(struct DoubleMatrix));
+    points3ds->nrows = sz; points3ds->ncols = (int)ndim;
+    points3ds->data = (double*) malloc(sz*ndimi*sizeof(double));
+
+    // allocating matrix to find nullvector
+    struct DoubleMatrix* A = (struct DoubleMatrix*) malloc(sizeof(struct DoubleMatrix));
+    A->nrows = ndimi+2; A->ncols = ndimi+1;
+    A->data = (double*) malloc((ndimi+2)*(ndimi+1)*sizeof(double));
+    for (int i = 0; i<ndimi+2; i++){
+        A->data[(ndimi+1)*i] = 1.0;
+    }
+
+    struct DoubleMatrix* Q = (struct DoubleMatrix*) malloc(sizeof(struct DoubleMatrix));
+    struct DoubleMatrix* R = (struct DoubleMatrix*) malloc(sizeof(struct DoubleMatrix));
+
+    // random permutation
+    int* sample = (int*) malloc(npoints*sizeof(int));
+    int j,temp;
+    for (int i = 0; i<npoints; i++){sample[i]=i;}
+    for (int i = npoints-1; i>=0; --i){
+        j = rand() % (i+1);
+        temp = sample[i];
+        sample[i] = sample[j];
+        sample[j] = temp;
+    }
+    for (int i = 0; i<n; i++){
+        for (int j = 0; j<ndimi; j++){
+            points3ds->data[3*i+j] = points3d->data[3*sample[i]+ j];
+        }
+    }
+
+    int qhead = 0;
+    int qtail = n-1;
+    int pos[ndimi];
+    int kk;
+    double sum;
+    while (qhead<qtail){
+        qtail++;
+        // store A
+        for (int i = 0; i<ndimi+2; i++){
+            for (int j = 0; j<ndimi; j++){
+                A->data[(ndimi+1)*i + j+1] = \
+                points3ds->data[ndimi*(qhead+i) + j];
+            }
+        }
+
+        // perform radon
+        kk = 0;
+        sum = 0.0;
+        QR(A,Q,R);
+        for (int i = 0; i<ndimi+2; i++){
+            if (Q->data[i*(ndimi+2) + ndimi+1] > 0){
+                pos[kk] = i;
+                kk++;
+                sum += Q->data[i*(ndimi+2) + ndimi+1];
+            }
+        }
+
+        // make new qtail
+        for (int j = 0; j<ndimi; j++){
+            // nullvec(pos)*A(pos,2:4)/sum(nullvec(pos));
+            points3ds->data[ndimi*qtail + j] = 0.0;
+            for (int k = 0; k<kk; k++){
+                points3ds->data[ndimi*qtail + j] += \
+                    Q->data[pos[k]*(ndimi+2) + ndimi+1] * \
+                    A->data[(ndimi+1)*pos[k] + j+1]/sum;
+            }
+        }
+        free(Q->data); free(R->data);
+
+        qhead+=ndimi+2;
+    }
+    
+    // store answer
+    for(int j = 0; j<ndimi; j++){
+        C[j] = points3ds->data[ndimi*qtail + j];
+    }
+    printf("centerpoint: %f %f %f\n",C[0],C[1],C[2]);
+
+    free(sample);
+    free(A->data); free(A);
+    free(Q); free(R);
+    free(points3ds->data);
+    free(points3ds);
+}
+
+void conmap(struct DoubleMatrix* points3d, double* C, struct DoubleMatrix* points3d_map){
+    int ndim = points3d->ncols;
+    int npoints = points3d->nrows;
+    struct DoubleMatrix* A = (struct DoubleMatrix*) malloc(sizeof(struct DoubleMatrix));
+    struct DoubleMatrix* Q = (struct DoubleMatrix*) malloc(sizeof(struct DoubleMatrix));
+    struct DoubleMatrix* R = (struct DoubleMatrix*) malloc(sizeof(struct DoubleMatrix));
+    struct DoubleMatrix* points_down = (struct DoubleMatrix*) malloc(sizeof(struct DoubleMatrix));
+
+    A->nrows = ndim; A->ncols = 1;
+    A->data = (double*) malloc(ndim*sizeof(double));
+    for (int i = 0; i<ndim; i++){
+        A->data[ndim-1-i] = C[i];
+    }
+
+    points_down->nrows = npoints;
+    points_down->ncols = ndim-1;
+    points_down->data = (double*) malloc(npoints*(ndim-1)*sizeof(double));
+
+    QR(A,Q,R);
+    double alpha = R->data[0];
+    alpha = sqrt((1.0+alpha)/(1.0-alpha));
+
+    // reverse Q
+    int start = 0; int end = (ndim)*(ndim)-1; int temp;
+    while (start < end){
+        temp = Q->data[start];
+        Q->data[start] = Q->data[end];
+        Q->data[end] = temp;
+        start++; end--;
+    }
+
+    // points3d_map = points3d*Q
+    for (int i = 0; i<npoints; i++){
+        for (int j = 0; j<ndim; j++){
+            points3d_map->data[ndim*i + j] = 0.0;
+            for (int k = 0; k<ndim; k++){
+                points3d_map->data[ndim*i + j] += \
+                    points3d->data[ndim*i + k] * \
+                    Q->data[ndim*k + j];
+            }
+        }
+    }
+
+    // project down
+
+    free(points_down->data); free(points_down);
+    free(A->data); free(A);
+    free(Q->data); free(Q);
+    free(R->data); free(R);
+    return;
+}
+
+
+
+
 void stereo_Project_up(struct DoubleMatrix* points2d, struct DoubleMatrix* points3d){
     int npoints = points2d->nrows;
     assert(points3d->nrows == npoints);
@@ -131,4 +285,9 @@ void stereo_Project_up(struct DoubleMatrix* points2d, struct DoubleMatrix* point
         points3d->data[3*ii+2] = 1.0 - 2.0 / nrmsqp1;
     }
     return;
+}
+
+void stereo_Project_down(struct DoubleMatrix* points2d, struct DoubleMatrix* points3d){
+    int npoints = points2d->nrows;
+    
 }

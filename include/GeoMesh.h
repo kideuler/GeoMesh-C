@@ -95,6 +95,10 @@ void IntMatrix_resize(struct IntMatrix* M, int newsz);
 
 double drand(double low, double high);
 struct DoubleMatrix DoubleMatrix_create_Random(int nrows, int ncols, double low, double high);
+struct DoubleMatrix Zeros(int m, int n);
+struct DoubleMatrix Eye(int n);
+struct DoubleMatrix prod(struct DoubleMatrix* A, struct DoubleMatrix* B);
+struct DoubleMatrix subtract(struct DoubleMatrix* A, struct DoubleMatrix* B);
 
 void DoubleMatrix_print(struct DoubleMatrix* M);
 void IntMatrix_print(struct IntMatrix* M);
@@ -159,6 +163,9 @@ void Mesh2vtk(struct Mesh* msh);
 void GeoMesh_partition(struct Mesh* msh, int type, int npartitions);
 void Mesh_Graphinit(struct Mesh* msh, int type);
 void Mesh_Graphprint(struct Mesh* msh);
+
+// linear algebra functions
+void QR(const struct DoubleMatrix* A, struct DoubleMatrix* Q, struct DoubleMatrix* R);
 
 // drawing mesh png using pbPlot
 void Mesh_draw(struct Mesh* msh);
