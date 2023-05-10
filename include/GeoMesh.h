@@ -163,6 +163,8 @@ void Mesh2vtk(struct Mesh* msh);
 void GeoMesh_partition(struct Mesh* msh, int type, int npartitions);
 void Mesh_Graphinit(struct Mesh* msh, int type);
 void Mesh_Graphprint(struct Mesh* msh);
+int MeshGraph_nnz(struct Mesh* msh, int* a, int sza, int* b, int szb, int part);
+void quicksort(double* x, int sz);
 
 // linear algebra functions
 void QR(const struct DoubleMatrix* A, struct DoubleMatrix* Q, struct DoubleMatrix* R);

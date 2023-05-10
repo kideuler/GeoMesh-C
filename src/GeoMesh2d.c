@@ -440,17 +440,52 @@ void Mesh_Graphinit(struct Mesh* msh, int type){
     msh->grph.type = type;
     int nelems = msh->nelems;
     int nv = msh->coords.nrows;
+    int nnz;
     
     switch (type){
-        case 1:
-        // code for vertex crs creation
+        case 1: // code for vertex crs creation
+        struct IntMatrix* G = (struct IntMatrix*) malloc(sizeof(struct IntMatrix));
+        G->data = (int*) malloc(nv*nv*sizeof(int));
+        memset(G->data, 0, nv*nv*sizeof(int));
+
+        int v1, v2;
+        nnz = 0;
+        for (int ii = 0; ii<nelems; ii++){
+            for (int jj = 0; jj<3; jj++){
+                v1 = msh->elems.data[3*ii + jj];
+                v2 = msh->elems.data[3*ii + (jj+1)%3];
+                if (G->data[v1*nv + v2] == 0){
+                    G->data[v1*nv + v2] = 1;
+                    nnz++;
+                }
+            }
+        }
+        
+        msh->grph.row_idx = (int*) malloc((nv+1)*sizeof(int));
+        msh->grph.col_idx = (int*) malloc(nnz*sizeof(int));
+        msh->grph.row_idx[0] = 0;
+        int nvnz; nnz = 0;
+        for (int i = 0; i<nv; i++){
+            nvnz = 0;
+            for (int j = 0; j<nv; j++){
+                if (G->data[i*nv + j] == 1){
+                    msh->grph.col_idx[nnz + nvnz] = j;
+                    nvnz++;
+                }
+            }
+            nnz += nvnz;
+            msh->grph.row_idx[i+1] = nnz;
+        }
+        
+
+        free(G->data); free(G);
         break;
 
         case 2: // code for element crs creation
         msh->grph.row_idx = (int*) malloc((nelems+1)*sizeof(int));
         msh->grph.col_idx = (int*) malloc(3*nelems*sizeof(int));
         msh->grph.row_idx[0] = 0;
-        int nnz, oppeid, nnz_elem;
+        int oppeid, nnz_elem;
         nnz = 0;
         for (int ii = 0; ii<nelems; ii++){
             nnz_elem = 0;
@@ -1183,6 +1218,7 @@ void Mesh_draw(struct Mesh* msh){
 
     double x1,x2,y1,y2;
     int ncols = msh->elems.ncols;
+    if (!msh->hasPartition){
     for (int i = 0; i<msh->nelems; i++){
         for (int j = 0; j<ncols; j++){
             x1 = MapXCoordinateBasedOnSettings(msh->coords.data[2*msh->elems.data[ncols*i + j]], settings);
@@ -1190,6 +1226,41 @@ void Mesh_draw(struct Mesh* msh){
             x2 = MapXCoordinateBasedOnSettings(msh->coords.data[2*msh->elems.data[ncols*i + (j+1)%ncols]], settings);
             y2 = MapYCoordinateBasedOnSettings(msh->coords.data[2*msh->elems.data[ncols*i + (j+1)%ncols]+1], settings);
             DrawLine(imageReference->image, x1,y1,x2,y2,1, CreateRGBColor(0, 0, 0));
+        }
+    }
+    }
+
+    if (msh->hasPartition && msh->mprts.type == 2){
+        int npart; int ptr;
+        double r,g,b;
+        for (int n = 0; n<msh->mprts.npartitions; n++){
+            npart = msh->mprts.parts_idx[n+1]-msh->mprts.parts_idx[n];
+            r = drand(0.0,1.0); g = drand(0.0,1.0); b = drand(0.0,1.0);
+            for (int i = 0; i<npart; i++){
+                ptr = msh->mprts.parts[msh->mprts.parts_idx[n]+i];
+                for (int j = 0; j<ncols; j++){
+                    x1 = MapXCoordinateBasedOnSettings(msh->coords.data[2*msh->elems.data[ncols*ptr + j]], settings);
+                    y1 = MapYCoordinateBasedOnSettings(msh->coords.data[2*msh->elems.data[ncols*ptr + j]+1], settings);
+                    x2 = MapXCoordinateBasedOnSettings(msh->coords.data[2*msh->elems.data[ncols*ptr + (j+1)%ncols]], settings);
+                    y2 = MapYCoordinateBasedOnSettings(msh->coords.data[2*msh->elems.data[ncols*ptr + (j+1)%ncols]+1], settings);
+                    DrawLine(imageReference->image, x1,y1,x2,y2,2, CreateRGBColor(r, b, g));
+                }
+            }
+        }
+    }
+
+    if (msh->hasPartition && msh->mprts.type == 1){
+        int npart; int ptr;
+        double r,g,b;
+        for (int n = 0; n<msh->mprts.npartitions; n++){
+            npart = msh->mprts.parts_idx[n+1]-msh->mprts.parts_idx[n];
+            r = drand(0.0,1.0); g = drand(0.0,1.0); b = drand(0.0,1.0);
+            for (int i = 0; i<npart; i++){
+                ptr = msh->mprts.parts[msh->mprts.parts_idx[n]+i];
+                x1 = MapXCoordinateBasedOnSettings(msh->coords.data[2*ptr], settings);
+                y1 = MapYCoordinateBasedOnSettings(msh->coords.data[2*ptr+1], settings);
+                DrawFilledCircle(imageReference->image, x1, y1, 15.0, CreateRGBColor(r, g, b));
+            }
         }
     }
 
