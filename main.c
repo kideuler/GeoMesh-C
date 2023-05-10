@@ -2,13 +2,13 @@
 
 int main(void){
     srand ( time(NULL) );
-    int npoints = 100;
+    int npoints = 200;
 
     struct DoubleMatrix xs;
     struct IntMatrix segs;
     struct DoubleMatrix ps;
     struct IntMatrix segs2;
-    double h = Ellipse(&segs, &xs, npoints,true);
+    double h = Flower(&segs, &xs, npoints,true);
     int nv = 3*npoints;
     double h2 = Flower(&segs2, &ps, nv, false);
     //load_lakeSuperior(&segs, &xs);
@@ -28,7 +28,7 @@ int main(void){
     }
     start = clock();
     msh.haskdTree = false;
-    //Mesh_compute_kdTree(&msh, ps, h, h_ratios, 0.1);
+    Mesh_compute_kdTree(&msh, ps, h, h_ratios, 0.1);
     diff = clock() - start;
     msec = diff * 1000 / CLOCKS_PER_SEC;
     printf("Created kd-Tree with %d nodes in %d seconds %d milliseconds\n", nv, msec/1000, msec%1000);
@@ -49,9 +49,22 @@ int main(void){
     msec = diff * 1000 / CLOCKS_PER_SEC;
     printf("finished mesh smoothing in %d seconds %d milliseconds\n", msec/1000, msec%1000);
 
-    GeoMesh_partition(&msh, 1, 2);
+    int nparts = 8;
+    int type = 2;
+    Mesh_Graphinit(&msh, type);
+    
 
-    Mesh2vtk(&msh);
+    start = clock();
+    GeoMesh_partition(&msh, type, nparts);
+    diff = clock() - start;
+    msec = diff * 1000 / CLOCKS_PER_SEC;
+    printf("finished mesh patition into %d pieces in %d seconds %d milliseconds\n",msh.mprts.npartitions, msec/1000, msec%1000);
+
+    for (int i = 0; i<nparts; i++){
+        printf("%d %d\n",msh.mprts.parts_idx[i+1], msh.mprts.parts_idx[i+1]-msh.mprts.parts_idx[i]);
+    }
+
+    Mesh_draw(&msh);
     free(bdy);
     return 0;
 }
