@@ -1229,13 +1229,17 @@ void Mesh_draw(struct Mesh* msh){
         }
     }
     }
+    double rs[8] = {0.0,1.0,1.0,0.0, 0.0,1.0,0.5,0.0};
+    double gs[8] = {0.0,0.0,1.0,1.0, 0.0,0.0,0.5,1.0};
+    double bs[8] = {0.0,0.0,0.0,0.0, 1.0,1.0,0.5,1.0};
 
     if (msh->hasPartition && msh->mprts.type == 2){
         int npart; int ptr;
         double r,g,b;
         for (int n = 0; n<msh->mprts.npartitions; n++){
             npart = msh->mprts.parts_idx[n+1]-msh->mprts.parts_idx[n];
-            r = drand(0.0,1.0); g = drand(0.0,1.0); b = drand(0.0,1.0);
+            if (n<8){r=rs[n]; g=gs[n]; b=bs[n];}
+            else {r = drand(0.0,1.0); g = drand(0.0,1.0); b = drand(0.0,1.0);}
             for (int i = 0; i<npart; i++){
                 ptr = msh->mprts.parts[msh->mprts.parts_idx[n]+i];
                 for (int j = 0; j<ncols; j++){
@@ -1243,7 +1247,7 @@ void Mesh_draw(struct Mesh* msh){
                     y1 = MapYCoordinateBasedOnSettings(msh->coords.data[2*msh->elems.data[ncols*ptr + j]+1], settings);
                     x2 = MapXCoordinateBasedOnSettings(msh->coords.data[2*msh->elems.data[ncols*ptr + (j+1)%ncols]], settings);
                     y2 = MapYCoordinateBasedOnSettings(msh->coords.data[2*msh->elems.data[ncols*ptr + (j+1)%ncols]+1], settings);
-                    DrawLine(imageReference->image, x1,y1,x2,y2,2, CreateRGBColor(r, b, g));
+                    DrawLine(imageReference->image, x1,y1,x2,y2,4, CreateRGBColor(r, b, g));
                 }
             }
         }

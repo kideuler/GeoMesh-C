@@ -2,17 +2,17 @@
 
 int main(void){
     srand ( time(NULL) );
-    int npoints = 200;
+    int npoints = 30;
 
     struct DoubleMatrix xs;
     struct IntMatrix segs;
     struct DoubleMatrix ps;
     struct IntMatrix segs2;
-    double h = Flower(&segs, &xs, npoints,true);
+    double h = Circle(&segs, &xs, npoints,false);
     int nv = 3*npoints;
     double h2 = Flower(&segs2, &ps, nv, false);
     //load_lakeSuperior(&segs, &xs);
-    //load_monalisa(&ps);
+    load_monalisa(&ps);
     nv = ps.nrows;
     
     clock_t start = clock(), diff;
@@ -24,11 +24,11 @@ int main(void){
 
     double* h_ratios = (double*) malloc(nv*sizeof(double));
     for (int i = 0; i<nv; i++){
-        h_ratios[i] = 0.1;
+        h_ratios[i] = 0.05;
     }
     start = clock();
     msh.haskdTree = false;
-    Mesh_compute_kdTree(&msh, ps, h, h_ratios, 0.1);
+    Mesh_compute_kdTree(&msh, ps, h, h_ratios, 0.02);
     diff = clock() - start;
     msec = diff * 1000 / CLOCKS_PER_SEC;
     printf("Created kd-Tree with %d nodes in %d seconds %d milliseconds\n", nv, msec/1000, msec%1000);
