@@ -1,4 +1,56 @@
 #include "GeoMesh.h"
+#include "omp.h"
+
+void Mesh_smooth2d_omp(struct Mesh* msh, bool* no_move, int max_Niters){
+    if (!msh->hasStencil){
+        Mesh_compute_OneringElements(msh, 10);
+    }
+
+    int iter = 0;
+    int v;
+    double Energy, Energy_total;
+    double Energy_old = 1e14;
+    double det,alpha;
+    int iter_move;
+
+    int nv = msh->coords.nrows;
+
+    // create grads arrays on the heap
+    double* Grads = (double*) malloc(2*nv*sizeof(double));
+    memset(Grads, 0.0, 2*nv*sizeof(double));
+    double* Grad_elem = (double*) malloc(3*2*sizeof(double));
+    memset(Grad_elem, 0.0, 3*2*sizeof(double));
+
+    // create hessian arrays on the heap
+    double* Hessian = (double*) malloc(2*2*nv*sizeof(double));
+    memset(Hessian, 0.0, 2*2*nv*sizeof(double));
+    double* Hess_elem = (double*) malloc(3*2*2*sizeof(double));
+    memset(Hess_elem, 0.0, 2*2*3*sizeof(double));
+    double* Hess_inv = (double*) malloc(2*2*sizeof(double));
+
+    // create coords_diff on the heap
+    double* coords_diff = (double*) malloc(nv*2*sizeof(double));
+    memset(coords_diff, 0.0, nv*2*sizeof(double));
+
+    double ps[6];
+    int rank, nprocs = omp_get_num_threads();
+
+    // begin parallel
+    #pragma omp parallel shared(Grads, Hessian, coords_diff, Energy, nprocs, iter) private(Grad_elem, Hess_elem, Hess_inv)
+    {
+    rank = omp_get_thread_num();
+    while (iter < max_Niters){
+
+
+        #pragma omp single
+        {
+        memset(Grads, 0.0, 2*nv*sizeof(double));
+        memset(Hessian, 0.0, 2*2*nv*sizeof(double));
+        iter++;
+        }
+    }
+    }
+}
 
 void Mesh_smooth2d(struct Mesh* msh, bool* no_move, int max_Niters){
     if (!msh->hasStencil){

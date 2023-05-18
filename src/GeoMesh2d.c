@@ -178,7 +178,7 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
                     }
 
                     if (!stop){
-                        Mesh_flip_insertion(msh,&nv,tri);
+                        Mesh_Bowyer_Watson_insertion(msh,&nv,tri);
                     }
                 }
                 nv++;
@@ -208,7 +208,7 @@ void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_targe
 
 // Constrained Delaunay triangulation driver function
 struct Mesh GeoMesh_ConstrainedDelaunay(struct IntMatrix *segments, struct DoubleMatrix *xs){
-    struct Mesh msh = GeoMesh_Delaunay(xs);
+    struct Mesh msh = GeoMesh_Delaunay(xs,1);
     int maxne=20;
     Mesh_compute_OneringElements(&msh,maxne);
     maxne = msh.stncl.maxne;
@@ -319,7 +319,7 @@ struct Mesh GeoMesh_ConstrainedDelaunay(struct IntMatrix *segments, struct Doubl
 }
 
 // Delaunay triangulation driver function
-struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
+struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs, int algorithm){
     int nv = xs->nrows;
 
     struct Mesh msh;
@@ -329,7 +329,9 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     msh.sibhfs = IntMatrix_create(upper_bound,3);
     msh.on_boundary = (bool* ) malloc(upper_bound*sizeof(bool));
     memset(msh.on_boundary, false, upper_bound*sizeof(bool));
-    msh.stack = (int*) malloc(upper_bound*sizeof(int));
+    msh.bwork = (bool* ) malloc(upper_bound*sizeof(bool));
+    memset(msh.bwork, false, upper_bound*sizeof(bool));
+    msh.stack = (int*) malloc(2*upper_bound*sizeof(int));
 
     // creating temporary buffers
     struct DoubleMatrix *coords = (struct DoubleMatrix *) malloc(sizeof(struct DoubleMatrix));
@@ -342,8 +344,8 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     double d = bx-ax > by-bx ? bx-ax : by-ay;
 
     for (int n = 0; n<nv; n++){
-        coords->data[n*coords->ncols] = (xs->data[n*xs->ncols] - ax)/d;
-        coords->data[n*coords->ncols+1] = (xs->data[n*xs->ncols+1] - ay)/d;
+        coords->data[n*coords->ncols] = (xs->data[n*xs->ncols] - ax)/d + 1e-6*drand(-1.0,1.0);
+        coords->data[n*coords->ncols+1] = (xs->data[n*xs->ncols+1] - ay)/d + 1e-6*drand(-1.0,1.0);
     }
 
     // sort points by proximity using binsort
@@ -397,7 +399,7 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     bool exitl, inside;
     msh.coords = *coords;
     msh.nelems = 1;
-    msh.delete_elem = (bool *) malloc(upper_bound*sizeof(bool));
+    msh.delete_elem = (bool*) malloc(upper_bound*sizeof(bool));
     memset(msh.delete_elem, false, upper_bound*sizeof(bool));
     for (int n = 0; n<nv; n++){
         vid = order[n];
@@ -405,11 +407,12 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
         // find enclosing triangle
         double ps[2] = {msh.coords.data[vid*msh.coords.ncols],msh.coords.data[vid*msh.coords.ncols+1]};
         inside = Mesh_find_enclosing_tri(&msh, &enclosed_tri, ps);
-
+        
         if (!inside){ printf("no enclosing triangle found\n");}
 
-        // insert node into triangulation using sloans flip insertion algorithm
-        Mesh_flip_insertion(&msh, &vid, enclosed_tri);
+        // insert node into triangulation using 2 different algorithms
+        if (algorithm == 1){Mesh_flip_insertion(&msh, &vid, enclosed_tri);}
+        else if (algorithm == 2){Mesh_Bowyer_Watson_insertion(&msh, &vid, enclosed_tri);}
     }
     free(bins);
     free(order);
@@ -423,8 +426,6 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
             }
         }
     }
-
-
     Mesh_deleteElems(&msh);
 
 
@@ -433,6 +434,99 @@ struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs){
     // freeing temporary buffers
     free(coords->data); free(coords);
     return msh;
+}
+
+// init AHF
+void Mesh_compute_AHF(struct Mesh* msh){
+    bool oriented = true;
+    bool manifold = true;
+    int nelems = msh->nelems;
+    int nv = msh->coords.nrows;
+    memset(msh->sibhfs.data, 0, msh->sibhfs.nrows*3*sizeof(int));
+    int nf = 3;
+    int* is_index = (int*) malloc((nv+1)*sizeof(int));
+    int v,c,vn;
+
+    for(int ii=0; ii<nv+1; ii++){ is_index[ii] = 0;}
+    for(int i = 0; i<nelems; i++){
+        for(int j = 0; j<nf; j++){
+            v = msh->elems.data[3*i+j]+1;
+            is_index[v]++;
+        }
+    }
+    is_index[0] = 0;
+
+    for(int ii=0; ii<nv; ii++){ is_index[ii+1] = is_index[ii]+is_index[ii+1]; }
+    int ne = nelems*nf;
+
+    int* v2nv = (int*) malloc(ne*sizeof(int));
+    int* v2he_fid = (int*) malloc(ne*sizeof(int));
+    int* v2he_leid = (int*) malloc(ne*sizeof(int));
+
+    for (int i = 0; i<nelems; i++){
+        for (int j = 0; j<nf; j++){
+            v = msh->elems.data[3*i+j];
+            c = is_index[v];
+            v2nv[c] = msh->elems.data[3*i+(j+1)%3];
+            v2he_fid[c] = i;
+            v2he_leid[c] = j;
+            is_index[v]++;
+        }
+    }
+
+    for(int ii=nv-1; ii>=0; ii--){ is_index[ii+1] = is_index[ii]; }
+    is_index[0] = 0;
+
+    int first_heid_fid, first_heid_leid, prev_heid_fid, prev_heid_leid, nhes;
+    for(int i = 0; i<nelems; i++){
+        for(int j = 0; j<3; j++){
+            if(msh->sibhfs.data[3*i+j]>0){continue;}
+            v = msh->elems.data[3*i+j];
+            vn = msh->elems.data[3*i + (j+1)%3];
+            first_heid_fid = i;
+            first_heid_leid = j;
+            prev_heid_fid = i;
+            prev_heid_leid = j;
+            nhes = 0;
+
+            // locate index in v2nv
+            for(int index = is_index[vn]; index<is_index[vn+1]; index++){
+                if(v2nv[index] == v){
+                    msh->sibhfs.data[3*prev_heid_fid+prev_heid_leid] = elids2hfid(v2he_fid[index]+1,v2he_leid[index]+1);
+                    prev_heid_fid = v2he_fid[index];
+                    prev_heid_leid = v2he_leid[index];
+                    nhes++;
+                }
+            }
+            // check for halfedges in the same orientation
+            for(int index = is_index[v]; index<is_index[v+1]; index++){
+                if(v2nv[index] == vn && v2he_fid[index] != i){
+                    msh->sibhfs.data[3*prev_heid_fid+prev_heid_leid] = elids2hfid(v2he_fid[index]+1,v2he_leid[index]+1);
+                    prev_heid_fid = v2he_fid[index];
+                    prev_heid_leid = v2he_leid[index];
+                    nhes++;
+                    oriented = true;
+                }
+            }
+            if(prev_heid_fid != first_heid_fid){
+                msh->sibhfs.data[3*prev_heid_fid+prev_heid_leid] = elids2hfid(first_heid_fid+1,first_heid_leid+1);
+                nhes++;
+            }
+
+            if(manifold && nhes>2){ manifold=false; oriented=false; }
+        }    
+    }
+    if (!manifold){
+        printf("Mesh is not a manifold");
+    }
+    if (!oriented){
+        printf("Mesh is oriented");
+    }
+
+    free(is_index); 
+    free(v2nv); 
+    free(v2he_fid); 
+    free(v2he_leid);
 }
 
 // init Mesh_crsGraph
@@ -552,11 +646,10 @@ void Mesh_deleteElems(struct Mesh* msh){
     for (int i = 0; i<msh->nelems; i++){
         if (!msh->delete_elem[i]){nelems++;}
     }
-
-    int* elems_data  = (int*)malloc(3*nelems*sizeof(int));
-    int* sibhfs_data  = (int*)malloc(3*nelems*sizeof(int));
-    int* idx = (int*)malloc(msh->nelems*sizeof(int));
-    int* idx_rev = (int*)malloc(msh->nelems*sizeof(int));
+    int* elems_data  = (int*) malloc(3*nelems*sizeof(int));
+    int* sibhfs_data  = (int*) malloc(3*nelems*sizeof(int));
+    int* idx = (int*) malloc(msh->nelems*sizeof(int));
+    int* idx_rev = (int*) malloc(msh->nelems*sizeof(int));
     memset(idx_rev,-1,msh->nelems*sizeof(int));
 
     int k = 0;
@@ -646,6 +739,81 @@ void Recursive_findDelete(struct Mesh* msh, int hfid){
     return;
 }
 
+// bowyer watson algorithm
+void Bowyer_watson_recursive_tri_find(struct Mesh* msh, const double ps[2], int tri, int* stack_size);
+void Mesh_Bowyer_Watson_insertion(struct Mesh* msh, int* vid, int tri_start){
+    // create recursive tri find
+    int stack_size = -1;
+    double xs[3][2], ps[2];
+    ps[0] = msh->coords.data[2*(*vid)]; ps[1] = msh->coords.data[2*(*vid)+1];
+    Bowyer_watson_recursive_tri_find(msh, ps, tri_start, &stack_size);
+
+    int eid, hfid, oppeid, opplid;
+    int nelems_new = 0;
+    for (int ii = 0; ii<=stack_size; ii++){
+        eid = msh->stack[ii];
+        for (int jj = 0; jj<3; jj++){
+            hfid = msh->sibhfs.data[3*eid + jj];
+            oppeid = (hfid==0)?0:hfid2eid(hfid)-1;
+            if (hfid == 0 || !msh->delete_elem[oppeid]){
+                msh->stack[3*nelems_new+stack_size+1] = msh->elems.data[3*eid + jj];
+                msh->stack[3*nelems_new+stack_size+2] = msh->elems.data[3*eid + (jj+1)%3];
+                msh->stack[3*nelems_new+stack_size+3] = hfid;
+                nelems_new++;
+            }
+        }
+    }
+
+    int eids[nelems_new];
+    int sz = (nelems_new<stack_size+1)?nelems_new:(stack_size+1);
+    for (int ii = 0; ii<sz; ii++){
+        eids[ii] = msh->stack[ii];
+    }
+
+    for (int ii = sz; ii<nelems_new;ii++){
+        eids[ii] = msh->nelems + ii-sz;
+    }
+    msh->nelems+=(nelems_new-sz);
+
+    for (int ii = 0; ii<nelems_new; ii++){
+        eid = eids[ii];
+        msh->delete_elem[eid] = false;
+        msh->elems.data[3*eid] = msh->stack[3*ii+stack_size+1];
+        msh->elems.data[3*eid+1] = msh->stack[3*ii+stack_size+2];
+        msh->elems.data[3*eid+2] = *vid;
+        hfid = msh->stack[3*ii+stack_size+3];
+        msh->sibhfs.data[3*eid] = hfid;
+        msh->sibhfs.data[3*eid+1] = 0;
+        msh->sibhfs.data[3*eid+2] = 0;
+        if (hfid != 0){
+            oppeid = hfid2eid(hfid)-1;
+            opplid = hfid2lid(hfid)-1;
+            msh->sibhfs.data[3*oppeid + opplid] = elids2hfid(eid+1,1);
+        }
+    }
+
+    // update ahf array using eids
+    int eid2, ii2;
+    int opps[3] = {0,2,1};
+    for (int ii = 0; ii<nelems_new-1; ii++){
+        eid = eids[ii];
+        for (int jj = 1; jj<3; jj++){
+            if (msh->sibhfs.data[3*eid + jj] == 0){
+                for (ii2 = ii+1; ii2<nelems_new; ii2++){
+                    eid2 = eids[ii2];
+                    if (msh->elems.data[3*eid+jj] == msh->elems.data[3*eid2+(opps[jj]+1)%3] && msh->elems.data[3*eid+(jj+1)%3] == msh->elems.data[3*eid2+opps[jj]]){
+                        msh->sibhfs.data[3*eid + jj] = elids2hfid(eid2+1, opps[jj]+1);
+                        msh->sibhfs.data[3*eid2 + opps[jj]] = elids2hfid(eid+1, jj+1);
+                    }
+                }
+            }
+        }
+    }
+
+    //Mesh_compute_AHF(msh);
+}
+
+// sloans flip insertion algorithm
 void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start){
     int hfid,eid,lid;
     msh->delete_elem[tri_start] = true;
@@ -792,6 +960,41 @@ void Mesh_flip_insertion_segment(struct Mesh* msh, int vid, int hfid){
     return;
 }
 
+// Recursive tri find for bowyer watson
+void Bowyer_watson_recursive_tri_find(struct Mesh* msh, const double ps[2], int tri, int* stack_size){
+    double xs[3][2];
+    int hfid,oppeid;
+    xs[0][0] = msh->coords.data[2*msh->elems.data[3*tri]];
+    xs[0][1] = msh->coords.data[2*msh->elems.data[3*tri]+1];
+    xs[1][0] = msh->coords.data[2*msh->elems.data[3*tri+1]];
+    xs[1][1] = msh->coords.data[2*msh->elems.data[3*tri+1]+1];
+    xs[2][0] = msh->coords.data[2*msh->elems.data[3*tri+2]];
+    xs[2][1] = msh->coords.data[2*msh->elems.data[3*tri+2]+1];
+
+    if (inside_circumtri(xs,ps)){
+        *stack_size = *stack_size + 1;
+        msh->stack[(*stack_size)] = tri;
+        msh->delete_elem[tri] = true;
+        hfid = msh->sibhfs.data[3*tri];
+        oppeid = hfid2eid(hfid)-1;
+        if (hfid!=0 && !msh->delete_elem[oppeid]){
+            Bowyer_watson_recursive_tri_find(msh, ps, oppeid, stack_size);
+        }
+
+        hfid = msh->sibhfs.data[3*tri+1];
+        oppeid = hfid2eid(hfid)-1;
+        if (hfid!=0 && !msh->delete_elem[oppeid]){
+            Bowyer_watson_recursive_tri_find(msh, ps, oppeid, stack_size);
+        }
+
+        hfid = msh->sibhfs.data[3*tri+2];
+        oppeid = hfid2eid(hfid)-1;
+        if (hfid!=0 && !msh->delete_elem[oppeid]){
+            Bowyer_watson_recursive_tri_find(msh, ps, oppeid, stack_size);
+        }
+    }
+}
+
 bool Mesh_find_enclosing_tri(struct Mesh* msh, int* tri, double ps[2]){
     int v1,v2,v3,i,hfid;
     bool stop;
@@ -865,6 +1068,30 @@ bool Mesh_find_enclosing_tri(struct Mesh* msh, int* tri, double ps[2]){
         printf("infinite loop encountered\n");
     }
     *tri = -1;
+    return false;
+}
+
+bool Mesh_find_enclosing_tri_noAHF(struct Mesh* msh, int* tri, double ps[2]){
+    int v1,v2,v3,i;
+    double xs[3][2];
+    for (i = 0; i<msh->nelems; i++){
+        if (!msh->delete_elem[i]){
+            v1 = msh->elems.data[i*(msh->elems.ncols)];
+            v2 = msh->elems.data[i*(msh->elems.ncols)+1];
+            v3 = msh->elems.data[i*(msh->elems.ncols)+2];
+            xs[0][0] = msh->coords.data[v1*msh->coords.ncols];
+            xs[0][1] = msh->coords.data[v1*msh->coords.ncols+1];
+            xs[1][0] = msh->coords.data[v2*msh->coords.ncols];
+            xs[1][1] = msh->coords.data[v2*msh->coords.ncols+1];
+            xs[2][0] = msh->coords.data[v3*msh->coords.ncols];
+            xs[2][1] = msh->coords.data[v3*msh->coords.ncols+1];
+            if(inside_tri(xs,ps)){
+                *tri = i;
+                printf("found tri: %d\n",i);
+                return true;
+            }
+        }
+    }
     return false;
 }
 

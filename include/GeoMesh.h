@@ -118,7 +118,7 @@ int hfid2eid(int hfid);
 int hfid2lid(int hfid);
 
 // Delaunay triangulation
-struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs);
+struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs, int algorithm);
 struct Mesh GeoMesh_ConstrainedDelaunay(struct IntMatrix *segments, struct DoubleMatrix *xs);
 void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_target, int point_algorithm);
 
@@ -127,13 +127,16 @@ void Mesh_smooth2d(struct Mesh* msh, bool* no_move, int max_Niters);
 double isometry_energy_tri(const double ps[6], double* Grad_elem, double* Hess_elem);
 
 // Delaunay subfunctions
+void Mesh_compute_AHF(struct Mesh* msh);
 void Mesh_compute_OneringElements(struct Mesh* msh, int maxne);
 void Mesh_compute_kdTree(struct Mesh* msh, const struct DoubleMatrix hcoords, double h, double* h_ratios, double hgrad);
 void Mesh_deleteElems(struct Mesh* msh);
 void Recursive_findDelete(struct Mesh* msh, int hfid);
 void Mesh_flip_insertion(struct Mesh* msh, int* vid, int tri_start);
+void Mesh_Bowyer_Watson_insertion(struct Mesh* msh, int* vid, int tri_start);
 void Mesh_flip_insertion_segment(struct Mesh* msh, int vid, int hfid);
 bool Mesh_find_enclosing_tri(struct Mesh* msh, int* tri, double ps[2]);
+bool Mesh_find_enclosing_tri_noAHF(struct Mesh* msh, int* tri, double ps[2]);
 void flip_edge(struct Mesh* msh, int eid, int lid);
 bool inside_tri(const double xs[3][2], const double ps[2]);
 bool inside_circumtri(const double xs[3][2], const double ps[2]);

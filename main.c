@@ -2,8 +2,7 @@
 
 int main(void){
     srand ( time(NULL) );
-    int npoints = 30;
-
+    int npoints = 50;
     struct DoubleMatrix xs;
     struct IntMatrix segs;
     struct DoubleMatrix ps;
@@ -12,12 +11,12 @@ int main(void){
     int nv = 3*npoints;
     double h2 = Flower(&segs2, &ps, nv, false);
     //load_lakeSuperior(&segs, &xs);
-    load_monalisa(&ps);
+    //load_monalisa(&ps);
     nv = ps.nrows;
     
     clock_t start = clock(), diff;
-    //struct Mesh msh = GeoMesh_Delaunay(&xs);
-    struct Mesh msh = GeoMesh_ConstrainedDelaunay(&segs,&xs);
+    struct Mesh msh = GeoMesh_Delaunay(&xs,2);
+    //struct Mesh msh = GeoMesh_ConstrainedDelaunay(&segs,&xs);
     diff = clock() - start;
     int msec = diff * 1000 / CLOCKS_PER_SEC;
     printf("Created %d Triangles from initial in %d seconds %d milliseconds\n", msh.nelems, msec/1000, msec%1000);
@@ -28,7 +27,7 @@ int main(void){
     }
     start = clock();
     msh.haskdTree = false;
-    Mesh_compute_kdTree(&msh, ps, h, h_ratios, 0.02);
+    Mesh_compute_kdTree(&msh, ps, h, h_ratios, 0.1);
     diff = clock() - start;
     msec = diff * 1000 / CLOCKS_PER_SEC;
     printf("Created kd-Tree with %d nodes in %d seconds %d milliseconds\n", nv, msec/1000, msec%1000);
@@ -40,16 +39,7 @@ int main(void){
     diff = clock() - start;
     msec = diff * 1000 / CLOCKS_PER_SEC;
     printf("Created %d Triangles from refinement in %d seconds %d milliseconds\n", msh.nelems, msec/1000, msec%1000);
-
-    bool* bdy = Mesh_find_bdy_nodes(&msh);
-
-    start = clock();
-    Mesh_smooth2d(&msh, bdy, 500);
-    diff = clock() - start;
-    msec = diff * 1000 / CLOCKS_PER_SEC;
-    printf("finished mesh smoothing in %d seconds %d milliseconds\n", msec/1000, msec%1000);
-
-    int nparts = 8;
+    int nparts = 4;
     int type = 2;
     Mesh_Graphinit(&msh, type);
     
@@ -64,7 +54,39 @@ int main(void){
         printf("%d %d\n",msh.mprts.parts_idx[i+1], msh.mprts.parts_idx[i+1]-msh.mprts.parts_idx[i]);
     }
 
+    // Mesh Smoothing
+    bool* bdy = Mesh_find_bdy_nodes(&msh);
+    start = clock();
+    Mesh_smooth2d(&msh, bdy, 500);
+    diff = clock() - start;
+    msec = diff * 1000 / CLOCKS_PER_SEC;
+    printf("finished mesh smoothing in %d seconds %d milliseconds\n", msec/1000, msec%1000);
+
     Mesh_draw(&msh);
     free(bdy);
+    /*
+    int npoints = 200000;
+    struct IntMatrix segs;
+    struct DoubleMatrix xs = DoubleMatrix_create_Random(npoints,2,0.0,1.0);
+    //double h = Flower(&segs, &xs, npoints,false);
+
+
+    clock_t start = clock(), diff;
+    struct Mesh msh = GeoMesh_Delaunay(&xs,1);
+    diff = clock() - start;
+    int msec = diff * 1000 / CLOCKS_PER_SEC;
+    printf("Created %d Triangles from initial in %d seconds %d milliseconds using Sloan flipping\n", msh.nelems, msec/1000, msec%1000);
+    check_jacobians(&msh);
+    check_sibhfs(&msh);
+
+    start = clock();
+    msh = GeoMesh_Delaunay(&xs, 2);
+    diff = clock() - start;
+    msec = diff * 1000 / CLOCKS_PER_SEC;
+    printf("Created %d Triangles from initial in %d seconds %d milliseconds using Bowyer-Watson\n", msh.nelems, msec/1000, msec%1000);
+    check_jacobians(&msh);
+    check_sibhfs(&msh);
+    //Mesh_draw(&msh);
+    */
     return 0;
 }
