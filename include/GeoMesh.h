@@ -87,6 +87,10 @@ double Ellipse(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoi
 double Flower(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoints, bool box);
 double Airfoil(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoints, bool box);
 
+double Cube(struct DoubleMatrix* coords, int npoints);
+double Ellipsoid(struct DoubleMatrix* coords, int npoints, bool box);
+double Sphere(struct DoubleMatrix* coords, int npoints, bool box);
+
 // matrix functions
 struct DoubleMatrix DoubleMatrix_create(int nrows, int ncols);
 struct IntMatrix IntMatrix_create(int nrows, int ncols);
@@ -121,6 +125,7 @@ int hfid2lid(int hfid);
 struct Mesh GeoMesh_Delaunay(struct DoubleMatrix *xs, int algorithm);
 struct Mesh GeoMesh_ConstrainedDelaunay(struct IntMatrix *segments, struct DoubleMatrix *xs);
 void GeoMesh_DelaunayRefine(struct Mesh *msh, bool use_edgelengh, double h_target, int point_algorithm);
+struct Mesh GeoMesh_Delaunay_tet(struct DoubleMatrix *xs);
 
 // isoparametric mesh smoothing functions
 void Mesh_smooth2d(struct Mesh* msh, bool* no_move, int max_Niters);
@@ -149,6 +154,16 @@ double p3x, double p3y, double p4x, double p4y);
 bool convex_quad(struct Mesh* msh, int eid, int lid);
 double eval_alpha(const double xs[3][2],double radius_target);
 double eval_trishape(const double xs[3][2]);
+
+// Delaunay Subfunctions 3D
+void Mesh_Bowyer_Watson_insertion3D(struct Mesh* msh, int vid, int tet_start);
+int inside_tet(const double xs[4][3], const double ps[3]);
+void circumcenter_tet(const double xs[4][3], double* C);
+bool inside_circumtet(const double xs[4][3], const double ps[3]);
+bool Mesh_find_enclosing_tet(struct Mesh* msh, int* tet, double ps[3]); // IMPL.
+bool Mesh_find_enclosing_tet_noAHF(struct Mesh* msh, int* tet, double ps[3]);
+void Mesh_deleteElems3D(struct Mesh* msh); // IMPL.
+void Mesh_compute_AHF3D(struct Mesh* msh);
 
 // kdTree functions
 struct kdTree kdTree_create(const struct DoubleMatrix coords);

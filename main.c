@@ -2,6 +2,7 @@
 
 int main(void){
     srand ( time(NULL) );
+    /*
     int npoints = 50;
     struct DoubleMatrix xs;
     struct IntMatrix segs;
@@ -64,29 +65,12 @@ int main(void){
 
     Mesh_draw(&msh);
     free(bdy);
-    /*
-    int npoints = 200000;
-    struct IntMatrix segs;
-    struct DoubleMatrix xs = DoubleMatrix_create_Random(npoints,2,0.0,1.0);
-    //double h = Flower(&segs, &xs, npoints,false);
-
-
-    clock_t start = clock(), diff;
-    struct Mesh msh = GeoMesh_Delaunay(&xs,1);
-    diff = clock() - start;
-    int msec = diff * 1000 / CLOCKS_PER_SEC;
-    printf("Created %d Triangles from initial in %d seconds %d milliseconds using Sloan flipping\n", msh.nelems, msec/1000, msec%1000);
-    check_jacobians(&msh);
-    check_sibhfs(&msh);
-
-    start = clock();
-    msh = GeoMesh_Delaunay(&xs, 2);
-    diff = clock() - start;
-    msec = diff * 1000 / CLOCKS_PER_SEC;
-    printf("Created %d Triangles from initial in %d seconds %d milliseconds using Bowyer-Watson\n", msh.nelems, msec/1000, msec%1000);
-    check_jacobians(&msh);
-    check_sibhfs(&msh);
-    //Mesh_draw(&msh);
     */
+
+    int npoints = 200;
+    struct IntMatrix segs;
+    struct DoubleMatrix xs = DoubleMatrix_create_Random(npoints,3,0.0,1.0);
+    struct Mesh msh = GeoMesh_Delaunay_tet(&xs);
+    //Mesh_print(&msh);
     return 0;
 }

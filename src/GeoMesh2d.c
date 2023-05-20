@@ -742,7 +742,6 @@ void Recursive_findDelete(struct Mesh* msh, int hfid){
 // bowyer watson algorithm
 void Bowyer_watson_recursive_tri_find(struct Mesh* msh, const double ps[2], int tri, int* stack_size);
 void Mesh_Bowyer_Watson_insertion(struct Mesh* msh, int* vid, int tri_start){
-    // create recursive tri find
     int stack_size = -1;
     double xs[3][2], ps[2];
     ps[0] = msh->coords.data[2*(*vid)]; ps[1] = msh->coords.data[2*(*vid)+1];
@@ -809,8 +808,7 @@ void Mesh_Bowyer_Watson_insertion(struct Mesh* msh, int* vid, int tri_start){
             }
         }
     }
-
-    //Mesh_compute_AHF(msh);
+    return;
 }
 
 // sloans flip insertion algorithm
