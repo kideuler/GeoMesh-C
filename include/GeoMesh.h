@@ -160,10 +160,11 @@ void Mesh_Bowyer_Watson_insertion3D(struct Mesh* msh, int vid, int tet_start);
 int inside_tet(const double xs[4][3], const double ps[3]);
 void circumcenter_tet(const double xs[4][3], double* C);
 bool inside_circumtet(const double xs[4][3], const double ps[3]);
-bool Mesh_find_enclosing_tet(struct Mesh* msh, int* tet, double ps[3]); // IMPL.
+bool Mesh_find_enclosing_tet(struct Mesh* msh, int* tet, double ps[3]);
 bool Mesh_find_enclosing_tet_noAHF(struct Mesh* msh, int* tet, double ps[3]);
-void Mesh_deleteElems3D(struct Mesh* msh); // IMPL.
+void Mesh_deleteElems3D(struct Mesh* msh);
 void Mesh_compute_AHF3D(struct Mesh* msh);
+double tet_vol(const double xs[4][3]);
 
 // kdTree functions
 struct kdTree kdTree_create(const struct DoubleMatrix coords);
@@ -174,8 +175,10 @@ int kdTree_find_nearest_node(struct kdTree* kdt, double* point);
 // mesh utility functions
 bool check_sibhfs(struct Mesh* msh);
 bool check_jacobians(struct Mesh* msh);
+bool check_jacobians_tet(struct Mesh* msh);
 bool* Mesh_find_bdy_nodes(struct Mesh* msh);
 void Mesh2vtk(struct Mesh* msh);
+void Mesh2vtk_tet(struct Mesh* msh);
 
 // mesh partitioning functions
 void GeoMesh_partition(struct Mesh* msh, int type, int npartitions);

@@ -67,10 +67,12 @@ int main(void){
     free(bdy);
     */
 
-    int npoints = 200;
+    int npoints = 2000;
     struct IntMatrix segs;
     struct DoubleMatrix xs = DoubleMatrix_create_Random(npoints,3,0.0,1.0);
+    //double h = Ellipsoid(&xs, npoints,false);
     struct Mesh msh = GeoMesh_Delaunay_tet(&xs);
-    //Mesh_print(&msh);
+    bool check = check_jacobians_tet(&msh);
+    Mesh2vtk_tet(&msh);
     return 0;
 }

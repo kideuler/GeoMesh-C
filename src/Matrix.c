@@ -409,3 +409,136 @@ double Airfoil(struct IntMatrix* segments, struct DoubleMatrix* coords, int npoi
     h = h/((double)npoints);
     return h;
 }
+
+
+double Cube(struct DoubleMatrix* coords, int npoints){
+    *coords = DoubleMatrix_create(npoints*npoints*npoints,3);
+
+    int ii,jj,kk,nn;
+    nn=0;
+    double h = 1.0 / ((double)npoints-1.0);
+    for (ii=0;ii<npoints;ii++){
+        for (jj=0;jj<npoints;jj++){
+            for (kk=0;kk<npoints;kk++){
+                coords->data[3*nn] = h*((double) kk);
+                coords->data[3*nn+1] = h*((double) jj);
+                coords->data[3*nn+2] = h*((double) ii);
+                nn++;
+            }
+        }
+    }
+}
+
+double Sphere(struct DoubleMatrix* coords, int npoints, bool box){
+    int size  = box?(npoints+8):npoints;
+    *coords = DoubleMatrix_create_Random(size,3,-M_PI,M_PI);
+
+    double phi = M_PI*(sqrt(5.0)-1);
+    double x,y,z,radius,theta;
+    for (int i = 0; i<size; i++){
+        y = 1.0 - (((double) i) / ((double) size-1))*2.0;
+        radius = sqrt(1.0-y*y);
+        theta = phi * ((double) i);
+        x = cos(theta)*radius;
+        z = sin(theta)*radius;
+
+        coords->data[3*i] = 0.3*x+0.5;
+        coords->data[3*i+1] = 0.3*y+0.5;
+        coords->data[3*i+2] = 0.3*z+0.5;
+    }
+
+    if (box){
+        coords->data[3*(npoints)] = 0.0;
+        coords->data[3*(npoints)+1] = 0.0;
+        coords->data[3*(npoints)+2] = 0.0;
+
+        coords->data[3*(npoints+1)] = 1.0;
+        coords->data[3*(npoints+1)+1] = 0.0;
+        coords->data[3*(npoints+1)+2] = 0.0;
+
+        coords->data[3*(npoints+2)] = 1.0;
+        coords->data[3*(npoints+2)+1] = 1.0;
+        coords->data[3*(npoints+2)+2] = 0.0;
+
+        coords->data[3*(npoints+3)] = 0.0;
+        coords->data[3*(npoints+3)+1] = 1.0;
+        coords->data[3*(npoints+3)+2] = 0.0;
+
+        coords->data[3*(npoints+4)] = 0.0;
+        coords->data[3*(npoints+4)+1] = 0.0;
+        coords->data[3*(npoints+4)+2] = 1.0;
+
+        coords->data[3*(npoints+5)] = 1.0;
+        coords->data[3*(npoints+5)+1] = 0.0;
+        coords->data[3*(npoints+5)+2] = 1.0;
+
+        coords->data[3*(npoints+6)] = 1.0;
+        coords->data[3*(npoints+6)+1] = 1.0;
+        coords->data[3*(npoints+6)+2] = 1.0;
+
+        coords->data[3*(npoints+7)] = 0.0;
+        coords->data[3*(npoints+7)+1] = 1.0;
+        coords->data[3*(npoints+7)+2] = 1.0;
+
+    }
+
+    double h = 0.0;
+    return h;
+}
+
+double Ellipsoid(struct DoubleMatrix* coords, int npoints, bool box){
+    int size  = box?(npoints+8):npoints;
+    *coords = DoubleMatrix_create_Random(size,3,-M_PI,M_PI);
+
+    double phi = M_PI*(sqrt(5.0)-1);
+    double x,y,z,radius,theta;
+    for (int i = 0; i<size; i++){
+        y = 1.0 - (((double) i) / ((double) size-1))*2.0;
+        radius = sqrt(1.0-y*y);
+        theta = phi * ((double) i);
+        x = cos(theta)*radius;
+        z = sin(theta)*radius;
+
+        coords->data[3*i] = (7.0/20.0)*x+0.5;
+        coords->data[3*i+1] = 0.25*y+0.5;
+        coords->data[3*i+2] = 0.2*z+0.5;
+    }
+
+    if (box){
+        coords->data[3*(npoints)] = 0.0;
+        coords->data[3*(npoints)+1] = 0.0;
+        coords->data[3*(npoints)+2] = 0.0;
+
+        coords->data[3*(npoints+1)] = 1.0;
+        coords->data[3*(npoints+1)+1] = 0.0;
+        coords->data[3*(npoints+1)+2] = 0.0;
+
+        coords->data[3*(npoints+2)] = 1.0;
+        coords->data[3*(npoints+2)+1] = 1.0;
+        coords->data[3*(npoints+2)+2] = 0.0;
+
+        coords->data[3*(npoints+3)] = 0.0;
+        coords->data[3*(npoints+3)+1] = 1.0;
+        coords->data[3*(npoints+3)+2] = 0.0;
+
+        coords->data[3*(npoints+4)] = 0.0;
+        coords->data[3*(npoints+4)+1] = 0.0;
+        coords->data[3*(npoints+4)+2] = 1.0;
+
+        coords->data[3*(npoints+5)] = 1.0;
+        coords->data[3*(npoints+5)+1] = 0.0;
+        coords->data[3*(npoints+5)+2] = 1.0;
+
+        coords->data[3*(npoints+6)] = 1.0;
+        coords->data[3*(npoints+6)+1] = 1.0;
+        coords->data[3*(npoints+6)+2] = 1.0;
+
+        coords->data[3*(npoints+7)] = 0.0;
+        coords->data[3*(npoints+7)+1] = 1.0;
+        coords->data[3*(npoints+7)+2] = 1.0;
+
+    }
+
+    double h = 0.0;
+    return h;
+}
